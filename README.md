@@ -1,82 +1,254 @@
-# Endgame
 
-Endgame is a modern chess product built to feel closer to a competitive training platform than a toy chessboard. It combines polished local play, an AI opponent powered by Stockfish, post-game coaching, replayable history, player progression, leaderboards, and a clear path to real-time multiplayer and monetized Pro features.
+# ♟️ Endgame — AI Chess Training Platform
 
-## Product Description
+**Endgame** is a modern chess platform designed not as a simple board, but as a **training-focused product**.
+It combines gameplay, AI-powered analysis, real-time multiplayer, and progression systems into a single experience.
 
-The app is designed around three loops:
+---
 
-- Play: local games, AI games, and online room-based games.
-- Improve: post-game engine review plus human-language coaching.
-- Progress: profiles, XP, achievements, ratings, and leaderboard visibility.
+## Overview
 
-The frontend is a Next.js application with a mobile-first dashboard experience. The backend is organized as a FastAPI service with REST and WebSocket interfaces so the product can scale from a single-player demo into authenticated multiplayer.
+Endgame is built around three core loops:
 
-## Features
+```text
+Play → Analyze → Improve → Progress
+```
 
-- Interactive drag-and-drop chessboard with full legal move validation using `chess.js`
-- Local multiplayer and AI matches with Stockfish-backed move selection
-- Post-game AI Coach with mistake detection, best-move suggestions, and optional OpenAI explanations
-- Replayable game history with move timeline scrubbing
-- Profiles with rating, XP, level, win/loss/draw stats, and city identity
-- Global and city-based leaderboard views
-- Achievement system and Pro feature gating
-- Dark/light theme and responsive UI
-- FastAPI backend structure for auth, game APIs, leaderboard endpoints, and WebSocket rooms
+* **Play** — against AI, locally, or in real-time multiplayer
+* **Analyze** — engine + AI explanations of mistakes
+* **Improve** — learn from personalized feedback
+* **Progress** — track rating, XP, and leaderboard position
 
-## Tech Stack
+---
 
-- Frontend: Next.js App Router, React, Tailwind CSS
-- Backend: FastAPI, WebSockets, JWT-ready auth structure
-- Database target: PostgreSQL
-- Chess engine: Stockfish WASM
-- Move validation: `chess.js`
-- AI explanation: OpenAI Responses API
+## Key Features
+
+### Gameplay
+
+* Drag-and-drop chessboard with full move validation (`chess.js`)
+* Single-player AI matches powered by **Stockfish**
+* Real-time multiplayer using **WebSockets**
+* Room-based matchmaking (create/join by link)
+* Reconnect support with state restoration
+
+---
+
+### AI Coaching
+
+* Post-game analysis:
+
+  * mistakes / blunders detection
+  * best move suggestions
+* Human-readable explanations (OpenAI)
+* Player personality insights
+* Visual mistake highlighting
+* **Pro features**:
+
+  * deeper explanations
+  * alternative lines
+  * training insights
+
+---
+
+### Progression & Social
+
+* User profiles:
+
+  * XP, level, wins/losses/draws
+* Global leaderboard
+* Achievement system
+* Game history with replay
+* City-based identity (social layer)
+
+---
+
+### Monetization (Mock)
+
+* Pro subscription system
+* Feature gating:
+
+  * advanced AI analysis
+  * premium UI themes
+  * training features
+
+---
 
 ## Architecture
 
+### Frontend (Next.js)
+
+```text
+frontend/
+├── src/app              → routing (App Router)
+├── src/features         → domain features (game, auth, profile)
+├── src/components       → UI components
+├── src/lib              → API client & utilities
+├── public/stockfish     → WASM chess engine
+```
+
+---
+
+### Backend (FastAPI)
+
+```text
+backend/
+├── app/main.py          → entrypoint
+├── app/api.py           → REST + WebSocket routes
+├── app/models           → SQLAlchemy models
+├── app/services         → business logic
+├── app/db               → database layer
+├── alembic/             → migrations
+```
+
+---
+
+### 🔌 System Design
+
+```text
+Frontend (Vercel)
+        ↓
+FastAPI Backend (Railway)
+        ↓
+PostgreSQL + Redis (Railway)
+        ↓
+Stockfish + OpenAI
+```
+
+---
+
+## ⚙️ Tech Stack
+
 ### Frontend
 
-- `frontend/src/app`: routing, layout, API route for coach explanations
-- `frontend/src/components/chess`: product UI and chess experience
-- `frontend/src/hooks`: client-side engine orchestration
-- `frontend/public/stockfish`: local Stockfish worker assets
+* Next.js (App Router)
+* React
+* Tailwind CSS
 
 ### Backend
 
-- `backend/app/main.py`: FastAPI entrypoint
-- `backend/app/api.py`: REST and WebSocket routes
-- `backend/app/schemas.py`: API contracts
-- `backend/app/store.py`: demo repository layer
-- `backend/app/services`: chess and coach services
-- `backend/sql/schema.sql`: PostgreSQL schema target for production persistence
+* FastAPI
+* WebSockets
+* JWT Authentication
+* SQLAlchemy (async)
+* Alembic
 
-## Why This Project Is Unique
+### Infrastructure
 
-Most chess demos stop at “you can move pieces.” Endgame is product-shaped:
+* PostgreSQL
+* Redis
+* Vercel (frontend)
+* Railway (backend)
 
-- It treats analysis as a user experience, not just a raw engine score.
-- It includes progression, city identity, and monetization hooks from the start.
-- It cleanly separates the real-time multiplayer path from the single-player learning loop.
-- It keeps the frontend demo usable even before every external service is configured.
+### Chess & AI
 
-## Running The App
+* `chess.js` — move validation
+* Stockfish (WASM)
+* OpenAI API — explanations
 
-### Frontend
+---
 
-1. `cd frontend`
-2. `npm install`
-3. Copy `.env.example` to `.env.local` and optionally add `OPENAI_API_KEY`
-4. `npm run dev`
+## What Makes It Different
+
+Endgame is **not just a chess app**:
+
+* Focus on **learning, not just playing**
+* Combines:
+
+  * real-time multiplayer
+  * AI coaching
+  * progression systems
+* Designed as a **product**, not a demo
+* Built with **scalable architecture from the start**
+
+---
+
+## Local Development
 
 ### Backend
 
-1. Install Python 3.11+
-2. `cd backend`
-3. `python -m venv .venv`
-4. `.venv\\Scripts\\activate`
-5. `pip install -r requirements.txt`
-6. `uvicorn app.main:app --reload`
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python -m alembic upgrade head
+uvicorn app.main:app --reload
+```
 
-The backend in this repo is organized as a working FastAPI demo service with in-memory storage. The included PostgreSQL schema shows the production persistence target.
+---
 
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+---
+
+### Environment Variables
+
+#### Backend
+
+```env
+DATABASE_URL=
+JWT_SECRET_KEY=
+REDIS_URL=
+CORS_ORIGINS=
+OPENAI_API_KEY=
+```
+
+---
+
+#### Frontend
+
+```env
+NEXT_PUBLIC_API_BASE_URL=
+NEXT_PUBLIC_CHESS_WS_URL=
+```
+
+---
+
+## Deployment
+
+### Frontend
+
+* Hosted on **Vercel**
+
+### Backend
+
+* Hosted on **Railway**
+
+### Services
+
+* PostgreSQL + Redis (Railway)
+
+---
+
+## Future Improvements
+
+* Rating system (ELO)
+* Advanced training modes (puzzles, drills)
+* Mobile optimization
+* Stripe integration for Pro
+
+---
+
+
+## Author
+
+**Sanzhar Omarkhanov**
+GitHub: [https://github.com/ssaannzzhhiikk](https://github.com/ssaannzzhhiikk)
+
+---
+
+## Final Note
+
+This project demonstrates:
+
+* Fullstack architecture
+* Real-time systems (WebSockets)
+* AI integration
+* Product thinking
+* Production-ready deployment
