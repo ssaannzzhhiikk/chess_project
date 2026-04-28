@@ -11,6 +11,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.db import get_db_session
 from app.main import app
+from app.middleware.rate_limit import in_memory_rate_limiter
 from app.models import Game, MultiplayerGame, User
 from app.persistence_schemas import MultiplayerGameRead
 from app.services.multiplayer import room_manager
@@ -23,6 +24,7 @@ class MultiplayerApiTests(TestCase):
         self.session = AsyncMock()
         self.session.add = Mock()
         self.users: dict = {}
+        in_memory_rate_limiter.reset()
 
         async def session_get(model, object_id):
             if model is User:
@@ -50,6 +52,7 @@ class MultiplayerApiTests(TestCase):
         app.dependency_overrides.clear()
         self.client.close()
         asyncio.run(room_manager.reset())
+        in_memory_rate_limiter.reset()
 
     def create_user_and_token(self, email: str) -> tuple[User, str]:
         user = User(email=email, hashed_password="stored-hash", is_pro=False, xp=0, wins=0)
@@ -119,6 +122,24 @@ class MultiplayerApiTests(TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"], "Room is full")
+
+    def test_room_create_rate_limit_returns_429(self) -> None:
+        _, token = self.create_user_and_token("white@example.com")
+
+        for _ in range(15):
+            response = self.client.post(
+                "/api/multiplayer/rooms",
+                headers=self.auth_headers(token),
+            )
+            self.assertEqual(response.status_code, 201)
+
+        rate_limited = self.client.post(
+            "/api/multiplayer/rooms",
+            headers=self.auth_headers(token),
+        )
+
+        self.assertEqual(rate_limited.status_code, 429)
+        self.assertEqual(rate_limited.json()["detail"], "Too many room creation requests. Please retry shortly.")
 
     def test_websocket_rejects_unauthenticated_connections(self) -> None:
         _, white_token = self.create_user_and_token("white@example.com")

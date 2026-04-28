@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/skeleton-card";
 import { UpgradeModal } from "@/components/ui/upgrade-modal";
-import { ApiError, ApiGame, ApiUser, clearAuthToken, getAuthToken, getGames, getProfile, upgradeToPro } from "@/lib/api";
+import { ApiError, ApiGame, ApiUser, clearAuthSession, getAuthToken, getGames, getProfile, upgradeToPro } from "@/lib/api";
 import { achievements, Profile } from "@/lib/mock-data";
 
 function toTitleCase(value: string) {
@@ -110,7 +110,7 @@ export function ProfilePage() {
         }
 
         if (cause instanceof ApiError && cause.status === 401) {
-          clearAuthToken();
+          clearAuthSession();
           router.replace("/login");
           return;
         }

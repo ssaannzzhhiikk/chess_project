@@ -10,15 +10,18 @@ import {
   useState,
 } from "react";
 
-import { defaultProfile, type Profile, appStorageKeys } from "@/lib/mock-data";
+import { defaultProfile, type Profile } from "@/lib/mock-data";
 import { readStorage, writeStorage } from "@/lib/storage";
 import {
   analyzeGame,
   ApiError,
+  clearAuthSession,
   createMultiplayerRoom,
   explainCoachMove,
   getAuthToken,
+  getAuthUserId,
   getProfile,
+  getScopedAppStorageKey,
   joinMultiplayerRoom,
   saveGame,
   type ApiMultiplayerRoom,
@@ -141,6 +144,7 @@ export function useChessGame() {
   const finishedRoomRef = useRef<string | null>(null);
   const autoConnectRoomRef = useRef<string | null>(null);
   const assignedColorRef = useRef<PlayerColor | null>(null);
+  const storageUserIdRef = useRef<string | null>(getAuthUserId());
   const { analyzePosition, ready: stockfishReady, error: stockfishError } =
     useStockfish();
   const { play } = useChessSounds();
@@ -237,6 +241,16 @@ export function useChessGame() {
     setLegalTargets([]);
   }, []);
 
+  const clearOnlineRoom = useCallback((nextConnectionState = "offline") => {
+    socketRef.current?.close();
+    socketRef.current = null;
+    roomStateRef.current = null;
+    assignedColorRef.current = null;
+    finishedRoomRef.current = null;
+    setRoomState(null);
+    setConnectionState(nextConnectionState);
+  }, []);
+
   const applyOnlineRoomSnapshot = useCallback(
     (snapshot: MultiplayerRoomSnapshot) => {
       const previousMoveCount = roomStateRef.current?.moves.length ?? 0;
@@ -267,11 +281,16 @@ export function useChessGame() {
   );
 
   useEffect(() => {
+    const storageUserId = getAuthUserId();
+    storageUserIdRef.current = storageUserId;
     const storedProfile = readStorage<Profile>(
-      appStorageKeys.profile,
+      getScopedAppStorageKey("profile", storageUserId),
       defaultProfile,
     );
-    const storedHistory = readStorage<StoredGame[]>(appStorageKeys.history, []);
+    const storedHistory = readStorage<StoredGame[]>(
+      getScopedAppStorageKey("history", storageUserId),
+      [],
+    );
 
     startTransition(() => {
       setProfile(storedProfile);
@@ -286,14 +305,14 @@ export function useChessGame() {
     if (!hydrated) {
       return;
     }
-    writeStorage(appStorageKeys.profile, profile);
+    writeStorage(getScopedAppStorageKey("profile", storageUserIdRef.current), profile);
   }, [hydrated, profile]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    writeStorage(appStorageKeys.history, gameHistory);
+    writeStorage(getScopedAppStorageKey("history", storageUserIdRef.current), gameHistory);
   }, [gameHistory, hydrated]);
 
   useEffect(() => {
@@ -310,6 +329,35 @@ export function useChessGame() {
           return;
         }
 
+        const nextUserId = user.id;
+        const previousUserId = storageUserIdRef.current;
+
+        if (previousUserId !== nextUserId) {
+          storageUserIdRef.current = nextUserId;
+          const nextProfile = readStorage<Profile>(
+            getScopedAppStorageKey("profile", nextUserId),
+            defaultProfile,
+          );
+          const nextHistory = readStorage<StoredGame[]>(
+            getScopedAppStorageKey("history", nextUserId),
+            [],
+          );
+
+          startTransition(() => {
+            setProfile({
+              ...nextProfile,
+              email: user.email,
+              isPro: user.is_pro,
+              xp: Math.max(nextProfile.xp, user.xp),
+              wins: Math.max(nextProfile.wins, user.wins),
+            });
+            setGameHistory(nextHistory);
+            setSelectedReplayId(nextHistory[0]?.id ?? null);
+            setReplayPly(nextHistory[0]?.moves.length ?? 0);
+          });
+          return;
+        }
+
         setProfile((current) => ({
           ...current,
           email: user.email,
@@ -318,6 +366,18 @@ export function useChessGame() {
           wins: Math.max(current.wins, user.wins),
         }));
       } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          clearAuthSession();
+          storageUserIdRef.current = null;
+          clearOnlineRoom();
+          startTransition(() => {
+            setProfile(defaultProfile);
+            setGameHistory([]);
+            setSelectedReplayId(null);
+            setReplayPly(0);
+          });
+          return;
+        }
         console.error("Failed to sync profile", error);
       }
     }
@@ -327,7 +387,7 @@ export function useChessGame() {
     return () => {
       active = false;
     };
-  }, [hydrated]);
+  }, [clearOnlineRoom, hydrated]);
 
   useEffect(() => {
     if (!hydrated || typeof window === "undefined") {
@@ -654,16 +714,6 @@ export function useChessGame() {
     clearSelection();
     syncGameState();
   }, [clearSelection, gameMode, syncGameState]);
-
-  const clearOnlineRoom = useCallback((nextConnectionState = "offline") => {
-    socketRef.current?.close();
-    socketRef.current = null;
-    roomStateRef.current = null;
-    assignedColorRef.current = null;
-    finishedRoomRef.current = null;
-    setRoomState(null);
-    setConnectionState(nextConnectionState);
-  }, []);
 
   const resignGame = useCallback(() => {
     if (gameMode === "online") {

@@ -16,7 +16,7 @@ import {
   ApiError,
   ApiGame,
   ApiGameAnalysis,
-  clearAuthToken,
+  clearAuthSession,
   getAuthToken,
   getGameAnalysis,
   getGames,
@@ -130,7 +130,7 @@ export function AnalysisPage() {
         }
 
         if (cause instanceof ApiError && cause.status === 401) {
-          clearAuthToken();
+          clearAuthSession();
           router.replace("/login");
           return;
         }

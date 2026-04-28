@@ -1,10 +1,14 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     app_name: str = "Endgame API"
     app_env: str = "development"
-    jwt_secret: str = "replace-me"
+    jwt_secret: str = Field(
+        default="replace-me-development-only",
+        validation_alias=AliasChoices("JWT_SECRET_KEY", "JWT_SECRET"),
+    )
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     openai_api_key: str = ""

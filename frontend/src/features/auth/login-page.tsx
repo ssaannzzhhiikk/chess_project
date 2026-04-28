@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ApiError, login, setAuthToken } from "@/lib/api";
+import { ApiError, login, setAuthSession } from "@/lib/api";
 
 export function LoginPage() {
   const router = useRouter();
@@ -23,7 +23,7 @@ export function LoginPage() {
 
     try {
       const response = await login(email, password);
-      setAuthToken(response.access_token);
+      setAuthSession(response);
       router.push("/profile");
     } catch (cause) {
       if (cause instanceof ApiError) {

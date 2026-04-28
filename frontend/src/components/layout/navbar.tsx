@@ -1,20 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Menu, MoonStar, Play, Sparkles, SunMedium, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { clearAuthSession, getAuthToken } from "@/lib/api";
 import { navLinks } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import { useTheme } from "./theme-provider";
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
   const { theme, toggleTheme } = useTheme();
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setAuthenticated(Boolean(getAuthToken()));
+    });
+  }, [pathname]);
+
+  function handleLogout() {
+    clearAuthSession();
+    setAuthenticated(false);
+    setOpen(false);
+    router.push("/login");
+    router.refresh();
+  }
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/8 bg-[color:rgba(10,10,14,0.65)] backdrop-blur-xl">
@@ -64,11 +81,17 @@ export function Navbar() {
               Play
             </Button>
           </Link>
-          <Link href="/login">
-            <Button size="sm" variant="secondary">
-              Login
+          {authenticated ? (
+            <Button onClick={handleLogout} size="sm" variant="secondary">
+              Logout
             </Button>
-          </Link>
+          ) : (
+            <Link href="/login">
+              <Button size="sm" variant="secondary">
+                Login
+              </Button>
+            </Link>
+          )}
         </div>
 
         <button
@@ -109,6 +132,17 @@ export function Navbar() {
                 </Button>
               </Link>
             </div>
+            {authenticated ? (
+              <Button className="w-full" onClick={handleLogout} size="sm" variant="secondary">
+                Logout
+              </Button>
+            ) : (
+              <Link href="/login" onClick={() => setOpen(false)}>
+                <Button className="w-full" size="sm" variant="secondary">
+                  Login
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
       ) : null}

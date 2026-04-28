@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.db import get_db_session
 from app.main import app
+from app.middleware.rate_limit import in_memory_rate_limiter
 from app.models import Game, User
 from app.persistence_schemas import AuthResponse, CoachInsightRead, GameRead, UserRead
 from app.services.persistence.auth import create_access_token
@@ -19,6 +20,7 @@ class AuthApiTests(TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
         self.session = AsyncMock()
+        in_memory_rate_limiter.reset()
 
         async def override_get_db_session():
             yield self.session
@@ -28,6 +30,7 @@ class AuthApiTests(TestCase):
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
         self.client.close()
+        in_memory_rate_limiter.reset()
 
     def test_register_returns_token_and_user(self) -> None:
         user = UserRead(
@@ -66,6 +69,36 @@ class AuthApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["detail"], "Invalid email or password")
+
+    def test_login_rate_limit_returns_429(self) -> None:
+        user = UserRead(
+            id=uuid4(),
+            email="player@example.com",
+            is_pro=False,
+            xp=0,
+            wins=0,
+            created_at=datetime.now(UTC),
+        )
+        auth_response = AuthResponse(access_token="access-token", user=user)
+
+        with (
+            patch("app.api.authenticate_user", AsyncMock(return_value=user)),
+            patch("app.api.build_auth_response", return_value=auth_response),
+        ):
+            for _ in range(5):
+                response = self.client.post(
+                    "/api/auth/login",
+                    json={"email": "player@example.com", "password": "secret"},
+                )
+                self.assertEqual(response.status_code, 200)
+
+            rate_limited = self.client.post(
+                "/api/auth/login",
+                json={"email": "player@example.com", "password": "secret"},
+            )
+
+        self.assertEqual(rate_limited.status_code, 429)
+        self.assertEqual(rate_limited.json()["detail"], "Too many login attempts. Please try again in a minute.")
 
     def test_auth_me_returns_current_user(self) -> None:
         user = User(email="player@example.com", hashed_password="stored-hash", is_pro=False, xp=0, wins=0)

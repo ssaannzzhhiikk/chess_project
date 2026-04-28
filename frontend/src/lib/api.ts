@@ -2,6 +2,9 @@ import { readStorage, removeStorage, writeStorage } from "@/lib/storage";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api").replace(/\/$/, "");
 const AUTH_TOKEN_KEY = "endgame-auth-token";
+const AUTH_USER_ID_KEY = "endgame-auth-user-id";
+const PROFILE_STORAGE_KEY = "endgame-profile";
+const HISTORY_STORAGE_KEY = "endgame-history";
 
 export type ApiUser = {
   id: string;
@@ -89,6 +92,7 @@ export type ApiRoomStateEvent = {
 
 export type ApiRoomErrorEvent = {
   type: "error";
+  code: string;
   message: string;
 };
 
@@ -110,12 +114,44 @@ export function getAuthToken() {
   return readStorage<string | null>(AUTH_TOKEN_KEY, null);
 }
 
+export function getAuthUserId() {
+  return readStorage<string | null>(AUTH_USER_ID_KEY, null);
+}
+
 export function setAuthToken(token: string) {
   writeStorage(AUTH_TOKEN_KEY, token);
 }
 
+export function setAuthUserId(userId: string) {
+  writeStorage(AUTH_USER_ID_KEY, userId);
+}
+
 export function clearAuthToken() {
   removeStorage(AUTH_TOKEN_KEY);
+}
+
+export function getScopedAppStorageKey(
+  key: "profile" | "history",
+  userId: string | null = getAuthUserId(),
+) {
+  const baseKey = key === "profile" ? PROFILE_STORAGE_KEY : HISTORY_STORAGE_KEY;
+  return userId ? `${baseKey}:user:${userId}` : baseKey;
+}
+
+export function clearUserScopedState(userId: string | null = getAuthUserId()) {
+  removeStorage(getScopedAppStorageKey("profile", userId));
+  removeStorage(getScopedAppStorageKey("history", userId));
+}
+
+export function clearAuthSession() {
+  clearUserScopedState(getAuthUserId());
+  removeStorage(AUTH_USER_ID_KEY);
+  clearAuthToken();
+}
+
+export function setAuthSession(response: ApiAuthResponse) {
+  setAuthToken(response.access_token);
+  setAuthUserId(response.user.id);
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -150,7 +186,7 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
     }
 
     if (response.status === 401) {
-      clearAuthToken();
+      clearAuthSession();
     }
 
     throw new ApiError(message, response.status);
@@ -167,7 +203,9 @@ export async function login(email: string, password: string) {
 }
 
 export async function getProfile() {
-  return apiRequest<ApiUser>("/auth/me", { auth: true });
+  const user = await apiRequest<ApiUser>("/auth/me", { auth: true });
+  setAuthUserId(user.id);
+  return user;
 }
 
 export async function getLeaderboard() {
