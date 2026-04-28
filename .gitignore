@@ -7,3 +7,30 @@ backend/__pycache__/
 backend/.env
 backend/.pytest_cache/
 backend/.env.example
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+
+# Pip temp (у тебя уже есть)
+backend/.pip-temp/
+
+# Env files
+backend/.env
+frontend/.env.local
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# TypeScript cache
+frontend/tsconfig.tsbuildinfo
