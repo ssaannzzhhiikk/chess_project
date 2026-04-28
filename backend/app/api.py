@@ -18,6 +18,7 @@ from .persistence_schemas import (
     GameRead,
     LeaderboardEntryRead,
     LeaderboardSort,
+    MultiplayerGameRead,
     MultiplayerRoomRead,
     ProfileRead,
     UpgradeResponse,
@@ -48,6 +49,8 @@ from .services.persistence import (
     get_coach_insight_by_game_id,
     get_leaderboard,
     get_profile as get_profile_service,
+    get_user_multiplayer_game,
+    get_user_multiplayer_games,
     get_user_games,
     save_coach_insight,
     upgrade_user_to_pro,
@@ -125,6 +128,26 @@ async def join_multiplayer_room(
     room = await room_manager.join_room(room_id, current_user.id)
     await room_manager.broadcast_room_state(room)
     return await room_manager.get_room_read(room.room_id, current_user.id)
+
+
+@router.get("/multiplayer/games", response_model=list[MultiplayerGameRead])
+async def list_multiplayer_games(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> list[MultiplayerGameRead]:
+    return await get_user_multiplayer_games(session, current_user.id)
+
+
+@router.get("/multiplayer/games/{game_id}", response_model=MultiplayerGameRead)
+async def read_multiplayer_game(
+    game_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> MultiplayerGameRead:
+    game = await get_user_multiplayer_game(session, current_user.id, game_id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Multiplayer game not found")
+    return game
 
 
 @router.get("/games", response_model=list[GameRead])

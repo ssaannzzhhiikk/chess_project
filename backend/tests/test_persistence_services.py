@@ -5,11 +5,16 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
-from app.models import CoachInsight, Game, User
-from app.persistence_schemas import CoachInsightCreate, GameCreate, UserCreate
+from app.models import CoachInsight, Game, MultiplayerGame, User
+from app.persistence_schemas import CoachInsightCreate, GameCreate, MultiplayerGameCreate, UserCreate
 from app.services.persistence.exceptions import DuplicateEmailError, EntityNotFoundError
 from app.services.persistence.coach_insights import save_coach_insight
 from app.services.persistence.games import create_game, get_user_games
+from app.services.persistence.multiplayer_games import (
+    create_multiplayer_game,
+    get_user_multiplayer_game,
+    get_user_multiplayer_games,
+)
 from app.services.persistence.users import create_user
 
 
@@ -218,3 +223,90 @@ class CoachInsightServiceTests(IsolatedAsyncioTestCase):
         session.add.assert_not_called()
         session.flush.assert_awaited_once()
         session.commit.assert_awaited_once()
+
+
+class MultiplayerGameServiceTests(IsolatedAsyncioTestCase):
+    async def test_create_multiplayer_game_persists_shared_record(self) -> None:
+        session = AsyncMock()
+        white_user = User(email="white@example.com", hashed_password="stored-hash", is_pro=False, xp=0, wins=0)
+        white_user.id = uuid4()
+        white_user.created_at = datetime.now(UTC)
+        black_user = User(email="black@example.com", hashed_password="stored-hash", is_pro=False, xp=0, wins=0)
+        black_user.id = uuid4()
+        black_user.created_at = datetime.now(UTC)
+
+        async def session_get(model, object_id):
+            if model is User and object_id == white_user.id:
+                return white_user
+            if model is User and object_id == black_user.id:
+                return black_user
+            return None
+
+        async def refresh_game(game: MultiplayerGame) -> None:
+            game.id = uuid4()
+            game.created_at = datetime.now(UTC)
+
+        session.get.side_effect = session_get
+        session.add = Mock()
+        session.refresh.side_effect = refresh_game
+
+        created_game = await create_multiplayer_game(
+            session,
+            MultiplayerGameCreate(
+                white_user_id=white_user.id,
+                black_user_id=black_user.id,
+                winner_user_id=white_user.id,
+                result="white",
+                pgn="1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0",
+                moves=["e4", "e5", "Qh5", "Nc6", "Bc4", "Nf6", "Qxf7#"],
+            ),
+        )
+
+        self.assertEqual(created_game.white_user_id, white_user.id)
+        self.assertEqual(created_game.black_user_id, black_user.id)
+        self.assertEqual(created_game.winner_user_id, white_user.id)
+        self.assertEqual(created_game.result, "white")
+        session.add.assert_called_once()
+        session.flush.assert_awaited_once()
+        session.commit.assert_awaited_once()
+        session.refresh.assert_awaited_once()
+
+    async def test_get_user_multiplayer_games_returns_participant_games_newest_first(self) -> None:
+        session = AsyncMock()
+        user_id = uuid4()
+        older_game = MultiplayerGame(
+            white_user_id=user_id,
+            black_user_id=uuid4(),
+            winner_user_id=user_id,
+            result="white",
+            pgn="1. e4",
+            moves=["e4"],
+        )
+        older_game.id = uuid4()
+        older_game.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+        newer_game = MultiplayerGame(
+            white_user_id=uuid4(),
+            black_user_id=user_id,
+            winner_user_id=None,
+            result="draw",
+            pgn="1. d4 d5 1/2-1/2",
+            moves=["d4", "d5"],
+        )
+        newer_game.id = uuid4()
+        newer_game.created_at = datetime(2024, 1, 2, tzinfo=UTC)
+
+        scalars_result = Mock()
+        scalars_result.all.return_value = [newer_game, older_game]
+        session.scalars.return_value = scalars_result
+
+        games = await get_user_multiplayer_games(session, user_id)
+
+        self.assertEqual([game.id for game in games], [newer_game.id, older_game.id])
+
+    async def test_get_user_multiplayer_game_returns_none_for_non_participant(self) -> None:
+        session = AsyncMock()
+        session.scalar.return_value = None
+
+        game = await get_user_multiplayer_game(session, uuid4(), uuid4())
+
+        self.assertIsNone(game)

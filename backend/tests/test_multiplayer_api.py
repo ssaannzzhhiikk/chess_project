@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from unittest import TestCase
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -11,7 +11,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.db import get_db_session
 from app.main import app
-from app.models import Game, User
+from app.models import Game, MultiplayerGame, User
+from app.persistence_schemas import MultiplayerGameRead
 from app.services.multiplayer import room_manager
 from app.services.persistence.auth import create_access_token
 
@@ -30,6 +31,9 @@ class MultiplayerApiTests(TestCase):
 
         async def refresh(entity) -> None:
             if isinstance(entity, Game):
+                entity.id = uuid4()
+                entity.created_at = datetime.now(UTC)
+            if isinstance(entity, MultiplayerGame):
                 entity.id = uuid4()
                 entity.created_at = datetime.now(UTC)
 
@@ -191,3 +195,72 @@ class MultiplayerApiTests(TestCase):
             self.assertEqual(restored["room"]["assigned_color"], "black")
             self.assertEqual(restored["room"]["moves"], ["e4"])
             self.assertEqual(restored["room"]["status"], "active")
+
+    def test_resignation_persists_single_shared_multiplayer_game(self) -> None:
+        _, white_token = self.create_user_and_token("white@example.com")
+        _, black_token = self.create_user_and_token("black@example.com")
+
+        room_id = self.client.post(
+            "/api/multiplayer/rooms",
+            headers=self.auth_headers(white_token),
+        ).json()["room_id"]
+        self.client.post(
+            f"/api/multiplayer/rooms/{room_id}/join",
+            headers=self.auth_headers(black_token),
+        )
+
+        with (
+            self.client.websocket_connect(f"/api/ws/games/{room_id}?token={white_token}") as white_socket,
+            self.client.websocket_connect(f"/api/ws/games/{room_id}?token={black_token}") as black_socket,
+        ):
+            white_socket.receive_json()
+            black_socket.receive_json()
+
+            white_socket.send_json({"type": "resign"})
+            white_state = white_socket.receive_json()
+            black_state = black_socket.receive_json()
+
+        self.assertEqual(white_state["room"]["status"], "finished")
+        self.assertEqual(black_state["room"]["status"], "finished")
+        self.assertEqual(white_state["room"]["result"], "black")
+        self.assertEqual(white_state["room"]["persisted_game_id"], black_state["room"]["persisted_game_id"])
+        self.assertEqual(self.session.add.call_count, 1)
+        persisted_entity = self.session.add.call_args.args[0]
+        self.assertIsInstance(persisted_entity, MultiplayerGame)
+        self.assertEqual(persisted_entity.result, "black")
+
+    def test_list_multiplayer_games_returns_authenticated_games(self) -> None:
+        user, token = self.create_user_and_token("white@example.com")
+        game = MultiplayerGameRead(
+            id=uuid4(),
+            white_user_id=user.id,
+            black_user_id=uuid4(),
+            winner_user_id=user.id,
+            result="white",
+            pgn="1. e4 e5 2. Qh5",
+            moves=["e4", "e5", "Qh5"],
+            created_at=datetime.now(UTC),
+        )
+
+        with patch("app.api.get_user_multiplayer_games", AsyncMock(return_value=[game])):
+            response = self.client.get(
+                "/api/multiplayer/games",
+                headers=self.auth_headers(token),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["id"], str(game.id))
+        self.assertEqual(response.json()[0]["white_user_id"], str(user.id))
+
+    def test_get_multiplayer_game_rejects_non_participant(self) -> None:
+        _, token = self.create_user_and_token("white@example.com")
+        game_id = uuid4()
+
+        with patch("app.api.get_user_multiplayer_game", AsyncMock(return_value=None)):
+            response = self.client.get(
+                f"/api/multiplayer/games/{game_id}",
+                headers=self.auth_headers(token),
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Multiplayer game not found")

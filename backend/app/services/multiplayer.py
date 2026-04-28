@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models import User
-from ..persistence_schemas import GameCreate, MultiplayerRoomRead
+from ..persistence_schemas import MultiplayerGameCreate, MultiplayerRoomRead
 from ..schemas import (
     RoomErrorEvent,
     RoomMove,
@@ -21,7 +21,7 @@ from ..schemas import (
     RoomStateEvent,
     RoomStatePayload,
 )
-from .persistence import create_game as create_game_service
+from .persistence import create_multiplayer_game as create_multiplayer_game_service
 
 
 class MultiplayerSocketError(Exception):
@@ -50,7 +50,7 @@ class MultiplayerRoom:
     last_move: RoomMoveSummary | None = None
     result: str | None = None
     termination: str | None = None
-    persisted_game_ids: dict[UUID, UUID] = field(default_factory=dict)
+    persisted_game_id: UUID | None = None
 
     def __post_init__(self) -> None:
         self.current_fen = self.board.fen()
@@ -220,7 +220,7 @@ class MultiplayerRoomManager:
             assigned_color=self._player_color(room, user_id),
             result=room.result,
             pgn=self._build_pgn(room),
-            persisted_game_id=room.persisted_game_ids.get(user_id),
+            persisted_game_id=room.persisted_game_id,
             termination=room.termination,
         )
 
@@ -238,7 +238,7 @@ class MultiplayerRoomManager:
                 last_move=room.last_move,
                 result=room.result,
                 pgn=self._build_pgn(room),
-                persisted_game_id=room.persisted_game_ids.get(user_id),
+                persisted_game_id=room.persisted_game_id,
                 termination=room.termination,
             )
         )
@@ -280,33 +280,22 @@ class MultiplayerRoomManager:
         room.termination = resolved_termination
         room.current_fen = room.board.fen()
 
-        if room.white_player_id is None or room.black_player_id is None or room.persisted_game_ids:
+        if room.white_player_id is None or room.black_player_id is None or room.persisted_game_id is not None:
             return
 
         pgn = self._build_pgn(room)
-        white_result, black_result = self._results_for_players(resolved_result)
-        white_game = await create_game_service(
+        saved_game = await create_multiplayer_game_service(
             session,
-            GameCreate(
-                user_id=room.white_player_id,
+            MultiplayerGameCreate(
+                white_user_id=room.white_player_id,
+                black_user_id=room.black_player_id,
+                winner_user_id=self._winner_user_id(room, resolved_result),
+                result=resolved_result,
                 pgn=pgn,
                 moves=list(room.moves),
-                result=white_result,
-                mode="multiplayer",
             ),
         )
-        black_game = await create_game_service(
-            session,
-            GameCreate(
-                user_id=room.black_player_id,
-                pgn=pgn,
-                moves=list(room.moves),
-                result=black_result,
-                mode="multiplayer",
-            ),
-        )
-        room.persisted_game_ids[room.white_player_id] = white_game.id
-        room.persisted_game_ids[room.black_player_id] = black_game.id
+        room.persisted_game_id = saved_game.id
 
     def _build_pgn(self, room: MultiplayerRoom) -> str:
         game = chess.pgn.Game.from_board(room.board)
@@ -352,12 +341,12 @@ class MultiplayerRoomManager:
             raise MultiplayerActionError("Illegal move.")
         return promoted
 
-    def _results_for_players(self, result: str) -> tuple[str, str]:
+    def _winner_user_id(self, room: MultiplayerRoom, result: str) -> UUID | None:
         if result == "white":
-            return "win", "loss"
+            return room.white_player_id
         if result == "black":
-            return "loss", "win"
-        return "draw", "draw"
+            return room.black_player_id
+        return None
 
     def _result_to_pgn(self, result: str) -> str:
         if result == "white":

@@ -163,6 +163,26 @@ class MultiplayerRoomRead(BaseModel):
     termination: str | None = None
 
 
+class MultiplayerGameCreate(BaseModel):
+    white_user_id: UUID
+    black_user_id: UUID
+    winner_user_id: UUID | None = None
+    result: GameOutcome
+    pgn: str = ""
+    moves: list[str] = Field(default_factory=list)
+
+
+class MultiplayerGameRead(PersistenceSchema):
+    id: UUID
+    white_user_id: UUID
+    black_user_id: UUID
+    winner_user_id: UUID | None
+    result: GameOutcome
+    pgn: str
+    moves: list[str]
+    created_at: datetime
+
+
 class AchievementRead(PersistenceSchema):
     id: UUID
     user_id: UUID
