@@ -21,10 +21,21 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=1)
 
 
+class UserLogin(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1)
+
+
 class UserRead(PersistenceSchema):
     id: UUID
     email: str
     created_at: datetime
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserRead
 
 
 class GameCreate(BaseModel):

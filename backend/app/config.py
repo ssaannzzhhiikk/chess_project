@@ -5,6 +5,8 @@ class Settings(BaseSettings):
     app_name: str = "Endgame API"
     app_env: str = "development"
     jwt_secret: str = "replace-me"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
     openai_api_key: str = ""
     cors_origins: str = "http://localhost:3000"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/chess_app"

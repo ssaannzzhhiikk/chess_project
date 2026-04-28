@@ -1,10 +1,15 @@
 from collections import defaultdict
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 from jose import jwt
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
+from .db import get_db_session
+from .dependencies import get_current_user
+from .models import User
+from .persistence_schemas import AuthResponse, UserCreate, UserLogin, UserRead
 from .schemas import (
     CoachExplanationRequest,
     CoachExplanationResponse,
@@ -19,6 +24,13 @@ from .schemas import (
 )
 from .services.chess_service import apply_game_result
 from .services.coach_service import explain_move
+from .services.persistence import (
+    DuplicateEmailError,
+    InvalidCredentialsError,
+    authenticate_user,
+    build_auth_response,
+    create_user as create_user_service,
+)
 from .store import store
 
 router = APIRouter(prefix="/api")
@@ -27,6 +39,39 @@ connections: dict[str, set[WebSocket]] = defaultdict(set)
 
 def encode_token(profile: UserProfile) -> str:
     return jwt.encode({"sub": profile.id, "username": profile.username}, settings.jwt_secret, algorithm="HS256")
+
+
+@router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    payload: UserCreate,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> AuthResponse:
+    try:
+        user = await create_user_service(session, payload)
+    except DuplicateEmailError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered") from exc
+    return build_auth_response(user)
+
+
+@router.post("/auth/login", response_model=AuthResponse)
+async def login(
+    payload: UserLogin,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> AuthResponse:
+    try:
+        user = await authenticate_user(session, payload)
+    except InvalidCredentialsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    return build_auth_response(user)
+
+
+@router.get("/auth/me", response_model=UserRead)
+async def read_current_user(current_user: Annotated[User, Depends(get_current_user)]) -> UserRead:
+    return UserRead.model_validate(current_user)
 
 
 @router.post("/auth/demo-login", response_model=LoginResponse)

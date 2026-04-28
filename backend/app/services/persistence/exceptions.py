@@ -8,3 +8,7 @@ class DuplicateEmailError(PersistenceError):
 
 class EntityNotFoundError(PersistenceError):
     pass
+
+
+class InvalidCredentialsError(PersistenceError):
+    pass
