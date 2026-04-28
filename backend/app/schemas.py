@@ -64,4 +64,5 @@ class RoomStateEvent(BaseModel):
 
 class RoomErrorEvent(BaseModel):
     type: Literal["error"] = "error"
+    code: str
     message: str

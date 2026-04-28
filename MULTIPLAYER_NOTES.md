@@ -6,8 +6,29 @@
 - A second authenticated player joins with `POST /api/multiplayer/rooms/{room_id}/join`.
 - WebSocket connections at `/api/ws/games/{room_id}` require a valid JWT.
 - The backend validates room membership, side ownership, turn order, and legal chess moves before broadcasting state.
+- WebSocket errors are now structured as:
+  - `type`
+  - `code`
+  - `message`
 - Reconnecting players receive the full current room snapshot, including FEN, move list, assigned color, room status, and the persisted multiplayer game id after finish.
 - Resignation, checkmate, and draw completion all finish the room on the server.
+
+## Room state storage
+
+- When `REDIS_URL` is configured, active multiplayer room state is stored in Redis.
+- Redis-backed room state includes:
+  - `room_id`
+  - player assignments via `white_player_id` and `black_player_id`
+  - current FEN
+  - move list
+  - room status
+  - disconnected players
+  - last move metadata
+  - finished result metadata
+  - persisted multiplayer game id
+- Because the room state lives outside the in-process room manager, a fresh room manager instance can restore an existing room from Redis without losing the game state.
+- Live socket connections are still process-local, but the authoritative room snapshot is no longer tied to one Python object.
+- If `REDIS_URL` is not configured, the backend falls back to in-memory room storage so existing development flows continue to work.
 
 ## Persistence model
 
@@ -30,11 +51,11 @@
 
 ## Current limitations
 
-- Room state is still in-process memory only. Restarting the FastAPI process clears active rooms.
-- Active rooms are not restored from PostgreSQL after restart.
+- If Redis is not configured, room state still lives only in process memory and will be lost on backend restart.
+- Even with Redis enabled, live WebSocket connections are not shared across backend instances.
+- Redis-backed room state improves recoverability after process-local manager resets, but it is not a full distributed lock or pub/sub multiplayer architecture yet.
 - WebSocket auth still uses the JWT as a query parameter because browsers cannot set arbitrary authorization headers for standard WebSocket connections.
 - Spectators are rejected instead of supported.
-- There is still no cross-process room coordination, so this implementation assumes a single backend instance.
 - Multiplayer analysis is still not wired into the separate `multiplayer_games` table; existing coach-analysis persistence remains tied to the original `games` table.
 
 ## Reconnect behavior
@@ -46,5 +67,5 @@
 
 ## Future recommendation
 
-- Move room state and pub/sub fanout to Redis before scaling beyond a single process.
+- Add Redis pub/sub or a similar fanout mechanism before scaling to multiple backend instances with shared live traffic.
 - If multiplayer analysis/history needs to converge with the existing profile/coach stack, add explicit linking between `multiplayer_games` and downstream analysis records instead of reusing the single-player `games` table.

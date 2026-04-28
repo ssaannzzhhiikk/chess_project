@@ -127,9 +127,61 @@ class MultiplayerApiTests(TestCase):
             headers=self.auth_headers(white_token),
         ).json()["room_id"]
 
-        with self.assertRaises(WebSocketDisconnect):
-            with self.client.websocket_connect(f"/api/ws/games/{room_id}"):
-                pass
+        with self.client.websocket_connect(f"/api/ws/games/{room_id}") as websocket:
+            error = websocket.receive_json()
+            self.assertEqual(error["type"], "error")
+            self.assertEqual(error["code"], "unauthenticated")
+            self.assertEqual(error["message"], "Authentication required.")
+            with self.assertRaises(WebSocketDisconnect):
+                websocket.receive_json()
+
+    def test_websocket_rejects_missing_room_with_structured_error(self) -> None:
+        _, token = self.create_user_and_token("white@example.com")
+
+        with self.client.websocket_connect(f"/api/ws/games/missing123?token={token}") as websocket:
+            error = websocket.receive_json()
+            self.assertEqual(error["type"], "error")
+            self.assertEqual(error["code"], "room_not_found")
+            self.assertEqual(error["message"], "Room not found.")
+            with self.assertRaises(WebSocketDisconnect):
+                websocket.receive_json()
+
+    def test_websocket_rejects_non_participant_when_room_not_full(self) -> None:
+        _, white_token = self.create_user_and_token("white@example.com")
+        _, outsider_token = self.create_user_and_token("outsider@example.com")
+        room_id = self.client.post(
+            "/api/multiplayer/rooms",
+            headers=self.auth_headers(white_token),
+        ).json()["room_id"]
+
+        with self.client.websocket_connect(f"/api/ws/games/{room_id}?token={outsider_token}") as websocket:
+            error = websocket.receive_json()
+            self.assertEqual(error["type"], "error")
+            self.assertEqual(error["code"], "player_not_in_room")
+            self.assertEqual(error["message"], "You are not a player in this room.")
+            with self.assertRaises(WebSocketDisconnect):
+                websocket.receive_json()
+
+    def test_websocket_rejects_third_socket_when_room_full(self) -> None:
+        _, white_token = self.create_user_and_token("white@example.com")
+        _, black_token = self.create_user_and_token("black@example.com")
+        _, outsider_token = self.create_user_and_token("outsider@example.com")
+        room_id = self.client.post(
+            "/api/multiplayer/rooms",
+            headers=self.auth_headers(white_token),
+        ).json()["room_id"]
+        self.client.post(
+            f"/api/multiplayer/rooms/{room_id}/join",
+            headers=self.auth_headers(black_token),
+        )
+
+        with self.client.websocket_connect(f"/api/ws/games/{room_id}?token={outsider_token}") as websocket:
+            error = websocket.receive_json()
+            self.assertEqual(error["type"], "error")
+            self.assertEqual(error["code"], "room_full")
+            self.assertEqual(error["message"], "Room is full.")
+            with self.assertRaises(WebSocketDisconnect):
+                websocket.receive_json()
 
     def test_websocket_rejects_wrong_turn_and_illegal_move(self) -> None:
         _, white_token = self.create_user_and_token("white@example.com")
@@ -154,11 +206,13 @@ class MultiplayerApiTests(TestCase):
             black_socket.send_json({"type": "move", "source": "e7", "target": "e5"})
             wrong_turn = black_socket.receive_json()
             self.assertEqual(wrong_turn["type"], "error")
+            self.assertEqual(wrong_turn["code"], "wrong_turn")
             self.assertEqual(wrong_turn["message"], "It is not your turn.")
 
             white_socket.send_json({"type": "move", "source": "e2", "target": "e5"})
             illegal_move = white_socket.receive_json()
             self.assertEqual(illegal_move["type"], "error")
+            self.assertEqual(illegal_move["code"], "illegal_move")
             self.assertEqual(illegal_move["message"], "Illegal move.")
 
     def test_reconnect_restores_room_state(self) -> None:

@@ -2,6 +2,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_db_session
@@ -254,16 +255,19 @@ async def game_room(
     room_id: str,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> None:
+    await websocket.accept()
     token = websocket.query_params.get("token")
     user = await room_manager.resolve_user(session, token)
     if user is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required")
+        await room_manager.send_error(websocket, "unauthenticated", "Authentication required.")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required.")
         return
 
     try:
         await room_manager.connect(room_id, user.id, websocket)
     except MultiplayerSocketError as exc:
-        await websocket.close(code=exc.code, reason=exc.reason)
+        await room_manager.send_error(websocket, exc.error_code, exc.message)
+        await websocket.close(code=exc.ws_code, reason=exc.message)
         return
 
     try:
@@ -278,8 +282,10 @@ async def game_room(
                     RoomResignation.model_validate(message)
                     await room_manager.process_resignation(session, room_id, user.id)
                 else:
-                    await room_manager.send_error(websocket, "Unsupported room event.")
+                    await room_manager.send_error(websocket, "unsupported_event", "Unsupported room event.")
+            except ValidationError:
+                await room_manager.send_error(websocket, "invalid_move_payload", "Invalid move payload.")
             except MultiplayerActionError as exc:
-                await room_manager.send_error(websocket, str(exc))
+                await room_manager.send_error(websocket, exc.error_code, exc.message)
     except WebSocketDisconnect:
         await room_manager.disconnect(room_id, user.id, websocket)
