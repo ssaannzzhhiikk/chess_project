@@ -12,6 +12,7 @@ import {
 
 import { defaultProfile, type Profile, appStorageKeys } from "@/lib/mock-data";
 import { readStorage, writeStorage } from "@/lib/storage";
+import { getAuthToken, saveGame } from "@/lib/api";
 import { useStockfish } from "@/hooks/use-stockfish";
 import { useChessSounds } from "@/hooks/use-chess-sounds";
 import { classify, detectOpening, getCapturedPieces, outcome, statusLabel } from "./chess-helpers";
@@ -40,6 +41,20 @@ async function explainMove(insight: CoachInsight, opening: string) {
   }
 
   return (await response.json()) as { explanation: string };
+}
+
+function toApiGameMode(mode: GameMode): "ai" | "multiplayer" {
+  return mode === "ai" ? "ai" : "multiplayer";
+}
+
+function toApiGameResult(result: "white" | "black" | "draw"): "win" | "loss" | "draw" {
+  if (result === "white") {
+    return "win";
+  }
+  if (result === "black") {
+    return "loss";
+  }
+  return "draw";
 }
 
 export function useChessGame() {
@@ -294,6 +309,18 @@ export function useChessGame() {
       setSelectedReplayId(finished.id);
       setReplayPly(finished.moves.length);
       await play("end");
+      if (getAuthToken()) {
+        try {
+          await saveGame({
+            pgn: finished.pgn,
+            moves: finished.moves,
+            result: toApiGameResult(finished.result),
+            mode: toApiGameMode(finished.mode),
+          });
+        } catch (error) {
+          console.error("Failed to save game", error);
+        }
+      }
       await analyzeCompletedGame(finished);
     },
     [analyzeCompletedGame, gameMode, play],

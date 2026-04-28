@@ -119,6 +119,19 @@ export async function getLeaderboard() {
   return apiRequest<ApiLeaderboardEntry[]>("/leaderboard");
 }
 
-export async function getGames(userId: string) {
-  return apiRequest<ApiGame[]>(`/games/${userId}`, { auth: true });
+export async function getGames() {
+  return apiRequest<ApiGame[]>("/games", { auth: true });
+}
+
+export async function saveGame(payload: {
+  pgn: string;
+  moves: string[];
+  result: "win" | "loss" | "draw";
+  mode: "ai" | "multiplayer";
+}) {
+  return apiRequest<ApiGame>("/games", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify(payload),
+  });
 }

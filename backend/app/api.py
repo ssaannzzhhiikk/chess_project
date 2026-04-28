@@ -9,11 +9,18 @@ from .config import settings
 from .db import get_db_session
 from .dependencies import get_current_user
 from .models import User
-from .persistence_schemas import AuthResponse, UserCreate, UserLogin, UserRead
+from .persistence_schemas import (
+    AuthResponse,
+    GameCreate,
+    GameCreateRequest,
+    GameRead,
+    UserCreate,
+    UserLogin,
+    UserRead,
+)
 from .schemas import (
     CoachExplanationRequest,
     CoachExplanationResponse,
-    CreateGameRequest,
     FinishGameRequest,
     GameRecord,
     LeaderboardEntry,
@@ -29,7 +36,9 @@ from .services.persistence import (
     InvalidCredentialsError,
     authenticate_user,
     build_auth_response,
+    create_game as create_game_service,
     create_user as create_user_service,
+    get_user_games,
 )
 from .store import store
 
@@ -93,24 +102,28 @@ async def get_profile(user_id: str) -> UserProfile:
     return profile
 
 
-@router.get("/games/{user_id}", response_model=list[GameRecord])
-async def list_games(user_id: str) -> list[GameRecord]:
-    return store.list_games(user_id)
+@router.get("/games", response_model=list[GameRead])
+async def list_games(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> list[GameRead]:
+    return await get_user_games(session, current_user.id)
 
 
-@router.post("/games", response_model=GameRecord)
-async def create_game(payload: CreateGameRequest) -> GameRecord:
-    user = store.get_user(payload.user_id)
-    game = GameRecord(
-        user_id=payload.user_id,
+@router.post("/games", response_model=GameRead, status_code=status.HTTP_201_CREATED)
+async def create_game(
+    payload: GameCreateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> GameRead:
+    game = GameCreate(
+        user_id=current_user.id,
+        pgn=payload.pgn,
+        moves=payload.moves,
+        result=payload.result,
         mode=payload.mode,
-        result="draw",
-        pgn="",
-        moves=[],
-        opening=None,
-        city=user.city if user else "Unknown",
     )
-    return store.add_game(game)
+    return await create_game_service(session, game)
 
 
 @router.post("/games/{game_id}/finish", response_model=GameRecord)

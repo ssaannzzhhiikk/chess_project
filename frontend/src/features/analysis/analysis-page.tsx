@@ -65,8 +65,8 @@ export function AnalysisPage() {
 
     async function loadHistory() {
       try {
-        const user = await getProfile();
-        const games = await getGames(user.id);
+        await getProfile();
+        const games = await getGames();
         const nextRows = mapGamesToRows(games);
 
         if (!active) {

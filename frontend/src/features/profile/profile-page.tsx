@@ -91,7 +91,7 @@ export function ProfilePage() {
     async function loadProfile() {
       try {
         const user = await getProfile();
-        const history = await getGames(user.id);
+        const history = await getGames();
 
         if (!active) {
           return;

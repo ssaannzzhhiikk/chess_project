@@ -46,6 +46,13 @@ class GameCreate(BaseModel):
     mode: GameMode
 
 
+class GameCreateRequest(BaseModel):
+    pgn: str = ""
+    moves: JSONList = Field(default_factory=list)
+    result: GameResult
+    mode: GameMode
+
+
 class GameRead(PersistenceSchema):
     id: UUID
     user_id: UUID
