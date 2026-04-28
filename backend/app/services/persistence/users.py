@@ -31,6 +31,8 @@ async def create_user(session: AsyncSession, payload: UserCreate) -> UserRead:
     user = User(
         email=normalized_email,
         hashed_password=hash_password(payload.password),
+        xp=0,
+        wins=0,
     )
     session.add(user)
     await session.flush()

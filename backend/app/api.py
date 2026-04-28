@@ -14,6 +14,9 @@ from .persistence_schemas import (
     GameCreate,
     GameCreateRequest,
     GameRead,
+    LeaderboardEntryRead,
+    LeaderboardSort,
+    ProfileRead,
     UserCreate,
     UserLogin,
     UserRead,
@@ -38,6 +41,8 @@ from .services.persistence import (
     build_auth_response,
     create_game as create_game_service,
     create_user as create_user_service,
+    get_leaderboard,
+    get_profile as get_profile_service,
     get_user_games,
 )
 from .store import store
@@ -81,6 +86,17 @@ async def login(
 @router.get("/auth/me", response_model=UserRead)
 async def read_current_user(current_user: Annotated[User, Depends(get_current_user)]) -> UserRead:
     return UserRead.model_validate(current_user)
+
+
+@router.get("/profile", response_model=ProfileRead)
+async def read_profile(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ProfileRead:
+    profile = await get_profile_service(session, current_user.id)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+    return profile
 
 
 @router.post("/auth/demo-login", response_model=LoginResponse)
@@ -143,20 +159,14 @@ async def finish_game(game_id: str, payload: FinishGameRequest) -> GameRecord:
     return game
 
 
-@router.get("/leaderboard", response_model=list[LeaderboardEntry])
-async def leaderboard(city: str | None = None) -> list[LeaderboardEntry]:
-    return [
-        LeaderboardEntry(
-            username=player.username,
-            city=player.city,
-            rating=player.rating,
-            xp=player.xp,
-            wins=player.wins,
-            losses=player.losses,
-            level=player.level,
-        )
-        for player in store.leaderboard(city)
-    ]
+@router.get("/leaderboard", response_model=list[LeaderboardEntryRead])
+async def leaderboard(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    sort_by: LeaderboardSort = "xp",
+    limit: int = 20,
+) -> list[LeaderboardEntryRead]:
+    limit = min(max(limit, 1), 100)
+    return await get_leaderboard(session, sort_by=sort_by, limit=limit)
 
 
 @router.post("/coach/explain", response_model=CoachExplanationResponse)

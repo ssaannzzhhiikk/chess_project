@@ -8,6 +8,14 @@ from ...persistence_schemas import GameCreate, GameRead
 from .exceptions import EntityNotFoundError
 
 
+def calculate_xp_gain(result: str) -> int:
+    if result == "win":
+        return 60
+    if result == "draw":
+        return 50
+    return 40
+
+
 async def create_game(session: AsyncSession, payload: GameCreate) -> GameRead:
     user = await session.get(User, payload.user_id)
     if user is None:
@@ -20,6 +28,9 @@ async def create_game(session: AsyncSession, payload: GameCreate) -> GameRead:
         result=payload.result,
         mode=payload.mode,
     )
+    user.xp += calculate_xp_gain(payload.result)
+    if payload.result == "win":
+        user.wins += 1
     session.add(game)
     await session.flush()
     await session.commit()

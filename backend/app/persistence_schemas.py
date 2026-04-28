@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 GameMode = Literal["ai", "multiplayer"]
 GameResult = Literal["win", "loss", "draw"]
+LeaderboardSort = Literal["xp", "wins"]
 JSONList = list[str | dict[str, Any]]
 
 
@@ -29,6 +30,8 @@ class UserLogin(BaseModel):
 class UserRead(PersistenceSchema):
     id: UUID
     email: str
+    xp: int
+    wins: int
     created_at: datetime
 
 
@@ -61,6 +64,43 @@ class GameRead(PersistenceSchema):
     result: GameResult
     mode: GameMode
     created_at: datetime
+
+
+class LeaderboardEntryRead(BaseModel):
+    username: str
+    city: str
+    rating: int
+    xp: int
+    wins: int
+    losses: int
+    level: int
+
+
+class ProfileUserRead(BaseModel):
+    id: UUID
+    email: str
+    username: str
+    xp: int
+    wins: int
+    level: int
+    rating: int
+    created_at: datetime
+
+
+class ProfileStatsRead(BaseModel):
+    total_games: int
+    wins: int
+    losses: int
+    draws: int
+    xp: int
+    level: int
+    rating: int
+
+
+class ProfileRead(BaseModel):
+    user: ProfileUserRead
+    stats: ProfileStatsRead
+    recent_games: list[GameRead]
 
 
 class CoachInsightCreate(BaseModel):

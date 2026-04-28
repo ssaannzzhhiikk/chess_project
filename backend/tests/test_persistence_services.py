@@ -21,6 +21,8 @@ class CreateUserServiceTests(IsolatedAsyncioTestCase):
 
         async def refresh_user(user: User) -> None:
             user.id = uuid4()
+            user.xp = 0
+            user.wins = 0
             user.created_at = datetime.now(UTC)
 
         session.refresh.side_effect = refresh_user
@@ -62,6 +64,37 @@ class GameServiceTests(IsolatedAsyncioTestCase):
                     mode="ai",
                 ),
             )
+
+    async def test_create_game_updates_user_wins_and_xp(self) -> None:
+        session = AsyncMock()
+        user = User(email="player@example.com", hashed_password="stored-hash", xp=0, wins=0)
+        user.id = uuid4()
+        user.created_at = datetime.now(UTC)
+        session.get.return_value = user
+
+        async def refresh_game(game: Game) -> None:
+            game.id = uuid4()
+            game.created_at = datetime.now(UTC)
+
+        session.add = Mock()
+        session.refresh.side_effect = refresh_game
+
+        created_game = await create_game(
+            session,
+            GameCreate(
+                user_id=user.id,
+                pgn="1. e4 e5 2. Nf3",
+                moves=["e4", "e5", "Nf3"],
+                result="win",
+                mode="ai",
+            ),
+        )
+
+        self.assertEqual(created_game.result, "win")
+        self.assertEqual(user.wins, 1)
+        self.assertEqual(user.xp, 60)
+        session.flush.assert_awaited_once()
+        session.commit.assert_awaited_once()
 
     async def test_get_user_games_returns_newest_first(self) -> None:
         session = AsyncMock()

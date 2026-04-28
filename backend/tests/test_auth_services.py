@@ -14,7 +14,7 @@ from app.services.persistence.exceptions import InvalidCredentialsError
 class AuthenticateUserServiceTests(IsolatedAsyncioTestCase):
     async def test_authenticate_user_returns_user_on_valid_password(self) -> None:
         session = AsyncMock()
-        user = User(email="player@example.com", hashed_password="stored-hash")
+        user = User(email="player@example.com", hashed_password="stored-hash", xp=0, wins=0)
         user.id = uuid4()
         user.created_at = datetime.now(UTC)
 
@@ -32,7 +32,7 @@ class AuthenticateUserServiceTests(IsolatedAsyncioTestCase):
 
     async def test_authenticate_user_rejects_invalid_password(self) -> None:
         session = AsyncMock()
-        user = User(email="player@example.com", hashed_password="stored-hash")
+        user = User(email="player@example.com", hashed_password="stored-hash", xp=0, wins=0)
         user.id = uuid4()
         user.created_at = datetime.now(UTC)
 
