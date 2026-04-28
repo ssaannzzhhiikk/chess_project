@@ -10,11 +10,10 @@ export function EmptyState({
   label?: string;
 }) {
   return (
-    <div className="rounded-[28px] border border-dashed border-white/12 bg-white/4 p-8 text-center">
+    <div className="rounded-2xl border border-dashed border-[var(--border-strong)] bg-[var(--surface)] p-8 text-center">
       <Badge>{label}</Badge>
       <h3 className="mt-4 text-xl font-semibold">{title}</h3>
       <p className="mt-2 text-sm leading-7 text-[var(--muted)]">{description}</p>
     </div>
   );
 }
-

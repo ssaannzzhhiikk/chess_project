@@ -1,6 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useMemo } from "react";
+
+import {
+  getBoardThemeStyles,
+  getCustomPieces,
+  type BoardThemeName,
+  type PieceSkinName,
+} from "@/features/game/board-appearance";
 
 const Chessboard = dynamic(
   () => import("react-chessboard").then((module) => module.Chessboard),
@@ -11,6 +19,8 @@ export function ChessBoard({
   fen,
   orientation,
   boardStyles,
+  boardTheme = "classic",
+  pieceSkin = "default",
   allowDragging,
   onPieceDrop,
   onSquareClick,
@@ -18,22 +28,33 @@ export function ChessBoard({
   fen: string;
   orientation: "white" | "black";
   boardStyles: Record<string, React.CSSProperties>;
+  boardTheme?: BoardThemeName;
+  pieceSkin?: PieceSkinName;
   allowDragging: boolean;
   onPieceDrop: (source: string, target: string) => boolean;
   onSquareClick: (square: string) => void;
 }) {
+  const themeStyles = getBoardThemeStyles(boardTheme);
+  const customPieces = useMemo(() => getCustomPieces(pieceSkin), [pieceSkin]);
+
   return (
-    <div className="rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-3 shadow-[0_24px_70px_rgba(0,0,0,0.25)]">
+    <div
+      className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-soft)]"
+      style={{
+        boxShadow: `0 18px 36px color-mix(in srgb, ${themeStyles.frame} 18%, transparent)`,
+      }}
+    >
       <Chessboard
         options={{
           id: "main-board",
+          pieces: customPieces,
           position: fen,
           boardOrientation: orientation,
           allowDragging,
           showAnimations: true,
           animationDurationInMs: 180,
-          darkSquareStyle: { backgroundColor: "#6a4630" },
-          lightSquareStyle: { backgroundColor: "#efe2c7" },
+          darkSquareStyle: { backgroundColor: themeStyles.darkSquare },
+          lightSquareStyle: { backgroundColor: themeStyles.lightSquare },
           squareStyles: boardStyles,
           onSquareClick: ({ square }) => onSquareClick(square),
           onPieceDrop: ({ sourceSquare, targetSquare }) =>
@@ -43,4 +64,3 @@ export function ChessBoard({
     </div>
   );
 }
-

@@ -7,6 +7,9 @@ import type { GameMode } from "@/features/game/types";
 
 export function GameControls({
   gameMode,
+  replayMode,
+  replayPly,
+  replayMoveCount,
   setGameMode,
   difficulty,
   setDifficulty,
@@ -19,8 +22,12 @@ export function GameControls({
   onNewGame,
   onResign,
   onUndo,
+  onReplayNext,
 }: {
   gameMode: GameMode;
+  replayMode: boolean;
+  replayPly: number;
+  replayMoveCount: number;
   setGameMode: (mode: GameMode) => void;
   difficulty: number;
   setDifficulty: (value: number) => void;
@@ -33,6 +40,7 @@ export function GameControls({
   onNewGame: () => void;
   onResign: () => void;
   onUndo: () => void;
+  onReplayNext: () => void;
 }) {
   return (
     <Card>
@@ -105,15 +113,23 @@ export function GameControls({
         <div className="grid gap-2 sm:grid-cols-2">
           <Button onClick={onNewGame} variant="primary">
             <RotateCcw className="h-4 w-4" />
-            New Game
+            {replayMode ? "Exit Replay" : "New Game"}
           </Button>
-          <Button onClick={onUndo} variant="secondary">
+          <Button
+            disabled={replayMode && replayPly === 0}
+            onClick={onUndo}
+            variant="secondary"
+          >
             <Undo2 className="h-4 w-4" />
-            Undo
+            {replayMode ? "Previous Move" : "Undo"}
           </Button>
-          <Button onClick={onResign} variant="secondary">
+          <Button
+            disabled={replayMode && replayPly >= replayMoveCount}
+            onClick={replayMode ? onReplayNext : onResign}
+            variant="secondary"
+          >
             <Swords className="h-4 w-4" />
-            Resign
+            {replayMode ? "Next Move" : "Resign"}
           </Button>
           <Link href="/analysis">
             <Button className="w-full" variant="ghost">

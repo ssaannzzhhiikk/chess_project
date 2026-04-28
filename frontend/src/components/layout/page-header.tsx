@@ -12,11 +12,11 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 rounded-[28px] border border-white/10 bg-white/4 p-6 backdrop-blur xl:flex-row xl:items-end xl:justify-between">
-      <div className="max-w-3xl">
+    <div className="flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-soft)] xl:flex-row xl:items-end xl:justify-between">
+      <div className="max-w-3xl space-y-3">
         {eyebrow ? <Badge>{eyebrow}</Badge> : null}
-        <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">{title}</h1>
-        <p className="mt-3 text-sm leading-7 text-[var(--muted)] sm:text-base">
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1>
+        <p className="text-base leading-7 text-[var(--muted)]">
           {description}
         </p>
       </div>
@@ -24,4 +24,3 @@ export function PageHeader({
     </div>
   );
 }
-

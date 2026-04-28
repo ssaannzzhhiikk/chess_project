@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Crown, FlipHorizontal2 } from "lucide-react";
 
 import { AnalysisPanel } from "@/components/chess/analysis-panel";
+import { BoardAppearancePanel } from "@/components/chess/board-appearance-panel";
 import { CapturedPieces } from "@/components/chess/captured-pieces";
 import { ChessBoard } from "@/components/chess/chess-board";
 import { EvaluationBar } from "@/components/chess/evaluation-bar";
@@ -80,7 +81,7 @@ export function PlayPage() {
 
           <GameStatus
             aiThinking={game.aiThinking}
-            status={game.status}
+            status={game.displayStatus}
             stockfishError={game.stockfishError}
             stockfishReady={game.stockfishReady}
           />
@@ -95,13 +96,16 @@ export function PlayPage() {
               <ChessBoard
                 allowDragging={
                   !game.aiThinking &&
+                  !game.replayMode &&
                   !(game.gameMode === "online" && !game.onlineConnected)
                 }
                 boardStyles={game.boardStyles}
-                fen={game.fen}
+                boardTheme={game.boardTheme}
+                fen={game.boardFen}
                 onPieceDrop={game.makeMove}
                 onSquareClick={game.handleSquareClick}
                 orientation={game.orientation}
+                pieceSkin={game.pieceSkin}
               />
             ) : (
               <LoadingBoard />
@@ -110,9 +114,9 @@ export function PlayPage() {
 
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
             <CapturedPieces
-              blackCaptured={game.captured.blackCaptured}
-              score={game.captured.score}
-              whiteCaptured={game.captured.whiteCaptured}
+              blackCaptured={game.displayCaptured.blackCaptured}
+              score={game.displayCaptured.score}
+              whiteCaptured={game.displayCaptured.whiteCaptured}
             />
             <AnalysisPanel
               analysisBusy={game.analysisBusy}
@@ -124,6 +128,13 @@ export function PlayPage() {
         </div>
 
         <div className="space-y-6">
+          <BoardAppearancePanel
+            boardTheme={game.boardTheme}
+            isPro={game.profile.isPro}
+            onBoardThemeChange={game.requestBoardTheme}
+            onPieceSkinChange={game.requestPieceSkin}
+            pieceSkin={game.pieceSkin}
+          />
           <GameControls
             createRoom={game.createRoom}
             connectRoom={game.connectRoom}
@@ -132,14 +143,18 @@ export function PlayPage() {
             gameMode={game.gameMode}
             inviteLink={game.inviteLink}
             onNewGame={() => game.resetBoard()}
+            onReplayNext={game.stepReplayForward}
             onResign={game.resignGame}
-            onUndo={game.undoMove}
+            onUndo={game.replayMode ? game.stepReplayBackward : game.undoMove}
+            replayMode={game.replayMode}
+            replayMoveCount={game.selectedReplay?.moves.length ?? 0}
+            replayPly={game.replayPly}
             roomCode={game.roomCode}
             setDifficulty={game.setDifficulty}
             setGameMode={(mode) => game.resetBoard(mode)}
             setRoomCode={game.setRoomCode}
           />
-          <MoveList moves={game.moveHistory} />
+          <MoveList moves={game.displayMoves} />
           <Card>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between">
@@ -158,10 +173,7 @@ export function PlayPage() {
                   <button
                     key={entry.id}
                     className="w-full rounded-[24px] border border-white/8 bg-white/4 p-4 text-left transition hover:border-[var(--accent)]"
-                    onClick={() => {
-                      game.setSelectedReplayId(entry.id);
-                      game.setReplayPly(entry.moves.length);
-                    }}
+                    onClick={() => game.openReplay(entry.id)}
                     type="button"
                   >
                     <p className="font-semibold">

@@ -17,6 +17,8 @@ export function AnalysisPanel({
   analysisBusy: boolean;
   onExplain: () => void;
 }) {
+  const topInsight = selectedReplay?.insights[0] ?? null;
+
   return (
     <Card className="h-full">
       <CardHeader>
@@ -55,22 +57,27 @@ export function AnalysisPanel({
                     </div>
                     <Badge>{insight.severity}</Badge>
                   </div>
-                  {insight.explanation ? (
+                  {insight.explanation || insight.summary ? (
                     <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-                      {insight.explanation}
+                      {insight.explanation ?? insight.summary}
                     </p>
                   ) : null}
                 </div>
               ))
             )}
             <Button
+              disabled={!profile.isPro || !topInsight || analysisBusy || Boolean(topInsight.coachExplained)}
               onClick={onExplain}
               variant={profile.isPro ? "primary" : "secondary"}
             >
               <Sparkles className="h-4 w-4" />
-              {profile.isPro
-                ? "Explain top mistake"
-                : "Advanced coach explanations are Pro"}
+              {!profile.isPro
+                ? "Advanced coach explanations are Pro"
+                : analysisBusy
+                  ? "Generating coach explanation..."
+                  : topInsight?.coachExplained
+                    ? "Coach explanation loaded"
+                    : "Explain top mistake"}
             </Button>
           </>
         )}

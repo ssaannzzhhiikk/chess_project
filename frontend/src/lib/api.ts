@@ -43,6 +43,16 @@ export type ApiGame = {
   created_at: string;
 };
 
+export type ApiMoveReview = {
+  ply: number;
+  san: string;
+  best_move: string;
+  severity: "best" | "inaccuracy" | "mistake" | "blunder";
+  evaluation: number;
+  delta: number;
+  summary: string;
+};
+
 export type ApiGameAnalysis = {
   id?: string;
   game_id?: string;
@@ -50,6 +60,7 @@ export type ApiGameAnalysis = {
   mistakes_count: number;
   blunders_count: number;
   best_moves: string[];
+  move_reviews: ApiMoveReview[];
 };
 
 export type ApiCoachExplanation = {
@@ -197,6 +208,13 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
 
 export async function login(email: string, password: string) {
   return apiRequest<ApiAuthResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function register(email: string, password: string) {
+  return apiRequest<ApiAuthResponse>("/auth/register", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });

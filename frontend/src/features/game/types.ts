@@ -12,7 +12,9 @@ export type CoachInsight = {
   evaluation: number;
   delta: number;
   severity: InsightSeverity;
+  summary?: string;
   explanation?: string;
+  coachExplained?: boolean;
 };
 
 export type StoredGame = {

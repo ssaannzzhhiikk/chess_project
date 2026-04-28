@@ -34,10 +34,10 @@ export function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/8 bg-[color:rgba(10,10,14,0.65)] backdrop-blur-xl">
+    <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--accent),#f7cf73)] text-[var(--accent-foreground)] shadow-[0_12px_30px_rgba(241,161,95,0.25)]">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent)] text-[var(--accent-foreground)]">
             <Sparkles className="h-5 w-5" />
           </div>
           <div>
@@ -52,10 +52,10 @@ export function Navbar() {
               key={link.href}
               href={link.href}
               className={cn(
-                "rounded-full px-4 py-2 text-sm transition",
+                "rounded-xl px-4 py-2 text-sm font-medium transition-colors",
                 pathname === link.href
-                  ? "bg-white/10 text-[var(--foreground)]"
-                  : "text-[var(--muted)] hover:bg-white/6 hover:text-[var(--foreground)]",
+                  ? "bg-[var(--surface)] text-[var(--foreground)] ring-1 ring-[var(--border-strong)]"
+                  : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]",
               )}
             >
               {link.label}
@@ -65,7 +65,7 @@ export function Navbar() {
 
         <div className="hidden items-center gap-2 md:flex">
           <button
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-[var(--muted)] transition hover:text-[var(--foreground)]"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
             onClick={toggleTheme}
             type="button"
           >
@@ -75,7 +75,7 @@ export function Navbar() {
               <MoonStar className="h-4 w-4" />
             )}
           </button>
-          <Link href="/play">
+          <Link href="/game">
             <Button size="sm">
               <Play className="h-4 w-4" />
               Play
@@ -86,16 +86,21 @@ export function Navbar() {
               Logout
             </Button>
           ) : (
-            <Link href="/login">
-              <Button size="sm" variant="secondary">
-                Login
-              </Button>
-            </Link>
+            <>
+              <Link href="/register">
+                <Button size="sm">Register</Button>
+              </Link>
+              <Link href="/login">
+                <Button size="sm" variant="secondary">
+                  Login
+                </Button>
+              </Link>
+            </>
           )}
         </div>
 
         <button
-          className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 md:hidden"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface)] md:hidden"
           onClick={() => setOpen((current) => !current)}
           type="button"
         >
@@ -104,14 +109,19 @@ export function Navbar() {
       </div>
 
       {open ? (
-        <div className="border-t border-white/8 px-4 py-4 md:hidden">
+        <div className="border-t border-[var(--border)] bg-[var(--background-soft)] px-4 py-4 md:hidden">
           <div className="space-y-2">
             <Badge>Navigation</Badge>
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className="block rounded-2xl px-4 py-3 text-sm text-[var(--muted)] transition hover:bg-white/6 hover:text-[var(--foreground)]"
+                className={cn(
+                  "block rounded-xl px-4 py-3 text-sm transition-colors",
+                  pathname === link.href
+                    ? "bg-[var(--surface)] font-medium text-[var(--foreground)]"
+                    : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]",
+                )}
                 onClick={() => setOpen(false)}
               >
                 {link.label}
@@ -126,7 +136,7 @@ export function Navbar() {
               >
                 {theme === "dark" ? "Light theme" : "Dark theme"}
               </Button>
-              <Link href="/play" className="flex-1" onClick={() => setOpen(false)}>
+              <Link href="/game" className="flex-1" onClick={() => setOpen(false)}>
                 <Button className="w-full" size="sm">
                   Play
                 </Button>
@@ -137,11 +147,18 @@ export function Navbar() {
                 Logout
               </Button>
             ) : (
-              <Link href="/login" onClick={() => setOpen(false)}>
-                <Button className="w-full" size="sm" variant="secondary">
-                  Login
-                </Button>
-              </Link>
+              <div className="space-y-2">
+                <Link href="/register" onClick={() => setOpen(false)}>
+                  <Button className="w-full" size="sm">
+                    Register
+                  </Button>
+                </Link>
+                <Link href="/login" onClick={() => setOpen(false)}>
+                  <Button className="w-full" size="sm" variant="secondary">
+                    Login
+                  </Button>
+                </Link>
+              </div>
             )}
           </div>
         </div>

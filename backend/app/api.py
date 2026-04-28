@@ -204,6 +204,7 @@ async def analyze_game(
             mistakes_count=analysis.mistakes_count,
             blunders_count=analysis.blunders_count,
             best_moves=analysis.best_moves,
+            move_reviews=analysis.move_reviews,
         ),
     )
     return AnalyzeGameResponse(
@@ -211,6 +212,7 @@ async def analyze_game(
         mistakes_count=saved_insight.mistakes_count,
         blunders_count=saved_insight.blunders_count,
         best_moves=[str(move) for move in saved_insight.best_moves],
+        move_reviews=saved_insight.move_reviews,
     )
 
 
@@ -225,9 +227,24 @@ async def read_game_analysis(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found")
 
     insight = await get_coach_insight_by_game_id(session, game_id)
-    if insight is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
-    return insight
+    if insight is not None:
+        return insight
+
+    analysis = analyze_game_content(
+        game.pgn,
+        moves=[move for move in game.moves if isinstance(move, str)],
+    )
+    return await save_coach_insight(
+        session,
+        CoachInsightCreate(
+            game_id=game_id,
+            summary=analysis.summary,
+            mistakes_count=analysis.mistakes_count,
+            blunders_count=analysis.blunders_count,
+            best_moves=analysis.best_moves,
+            move_reviews=analysis.move_reviews,
+        ),
+    )
 
 
 @router.get("/leaderboard", response_model=list[LeaderboardEntryRead])

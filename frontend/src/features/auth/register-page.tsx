@@ -7,9 +7,9 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ApiError, login, setAuthSession } from "@/lib/api";
+import { ApiError, register, setAuthSession } from "@/lib/api";
 
-export function LoginPage() {
+export function RegisterPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,14 +22,14 @@ export function LoginPage() {
     setError(null);
 
     try {
-      const response = await login(email, password);
+      const response = await register(email, password);
       setAuthSession(response);
       router.push("/profile");
     } catch (cause) {
       if (cause instanceof ApiError) {
         setError(cause.message);
       } else {
-        setError("Unable to sign in right now.");
+        setError("Unable to create an account right now.");
       }
     } finally {
       setSubmitting(false);
@@ -40,16 +40,16 @@ export function LoginPage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
         eyebrow="Authentication"
-        title="Sign in to keep your rating, history, and AI coaching in sync."
-        description="This screen is ready to connect to JWT or Supabase auth later. For now, it provides a polished product shell."
+        title="Create an account to save your progress, games, and coaching."
+        description="Register with your email to unlock synced history, profile tracking, and multiplayer access."
       />
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <CardContent className="space-y-4">
-            <p className="text-2xl font-semibold">Welcome back</p>
+            <p className="text-2xl font-semibold">Create account</p>
             <p className="text-sm leading-7 text-[var(--muted)]">
-              Sign in to continue your chess training loop and unlock synced replays, progress, and Pro analysis.
+              Start with a simple email and password, then continue into your profile and saved match history.
             </p>
             <form className="space-y-4" onSubmit={handleSubmit}>
               <div className="space-y-3">
@@ -70,13 +70,13 @@ export function LoginPage() {
               </div>
               {error ? <p className="text-sm text-rose-300">{error}</p> : null}
               <Button className="w-full" disabled={submitting} type="submit">
-                {submitting ? "Signing in..." : "Login"}
+                {submitting ? "Creating account..." : "Register"}
               </Button>
             </form>
             <p className="text-sm text-[var(--muted)]">
-              No account yet?{" "}
-              <Link className="text-[var(--foreground)] underline underline-offset-4" href="/register">
-                Create one
+              Already have an account?{" "}
+              <Link className="text-[var(--foreground)] underline underline-offset-4" href="/login">
+                Sign in
               </Link>
             </p>
           </CardContent>
@@ -86,22 +86,15 @@ export function LoginPage() {
           <CardContent className="flex h-full flex-col justify-between">
             <div>
               <p className="text-sm uppercase tracking-[0.22em] text-[var(--muted)]">
-                Why players upgrade
+                What you unlock
               </p>
               <h3 className="mt-4 text-3xl font-semibold">
-                Deeper AI coaching, cleaner replay tools, and a profile worth returning to.
+                Persistent game history, profile progress, Pro upgrade flow, and online rooms tied to your account.
               </h3>
             </div>
-            <div className="mt-6 flex flex-col gap-3">
-              <Link href="/register">
-                <Button className="w-full">Register</Button>
-              </Link>
-              <Link href="/game">
-                <Button className="w-full" variant="secondary">
-                  Continue as guest
-                </Button>
-              </Link>
-            </div>
+            <Link href="/login" className="mt-6">
+              <Button variant="secondary">Back to login</Button>
+            </Link>
           </CardContent>
         </Card>
       </div>

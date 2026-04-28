@@ -22,15 +22,15 @@ export function UpgradeModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(7,10,18,0.74)] p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.38)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(2,6,23,0.72)] p-4">
+      <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-soft)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Upgrade to Pro</p>
             <h3 className="mt-3 text-2xl font-semibold">Unlock advanced AI Coach</h3>
           </div>
           <button
-            className="rounded-full border border-white/10 p-2 text-[var(--muted)] transition hover:text-[var(--foreground)]"
+            className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] p-2 text-[var(--muted)] transition hover:text-[var(--foreground)]"
             onClick={onClose}
             type="button"
           >
@@ -38,7 +38,7 @@ export function UpgradeModal({
           </button>
         </div>
 
-        <div className="mt-5 rounded-[24px] border border-[rgba(241,161,95,0.22)] bg-[rgba(241,161,95,0.08)] p-4 text-sm text-[var(--muted)]">
+        <div className="mt-5 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-strong)] p-4 text-sm text-[var(--muted)]">
           Pro gives you backend AI analysis, saved coach breakdowns, and move-by-move explanations.
         </div>
 
@@ -49,7 +49,7 @@ export function UpgradeModal({
         </div>
 
         {error ? (
-          <p className="mt-4 rounded-[18px] border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+          <p className="mt-4 rounded-xl border border-rose-400/30 bg-rose-950/40 px-4 py-3 text-sm text-rose-100">
             {error}
           </p>
         ) : null}

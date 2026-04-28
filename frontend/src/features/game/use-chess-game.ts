@@ -11,15 +11,20 @@ import {
 } from "react";
 
 import { defaultProfile, type Profile } from "@/lib/mock-data";
+import { clearPendingReplay, readPendingReplay } from "@/lib/replay";
 import { readStorage, writeStorage } from "@/lib/storage";
 import {
   analyzeGame,
   ApiError,
+  type ApiGame,
+  type ApiMoveReview,
   clearAuthSession,
   createMultiplayerRoom,
   explainCoachMove,
   getAuthToken,
   getAuthUserId,
+  getGameAnalysis,
+  getGames,
   getProfile,
   getScopedAppStorageKey,
   joinMultiplayerRoom,
@@ -32,6 +37,12 @@ import {
 } from "@/lib/api";
 import { useStockfish } from "@/hooks/use-stockfish";
 import { useChessSounds } from "@/hooks/use-chess-sounds";
+import {
+  defaultBoardAppearance,
+  isPremiumPieceSkin,
+  type BoardThemeName,
+  type PieceSkinName,
+} from "./board-appearance";
 import { detectOpening, getCapturedPieces, outcome, statusLabel } from "./chess-helpers";
 import type {
   CoachInsight,
@@ -42,6 +53,11 @@ import type {
 } from "./types";
 
 const initialGame = new Chess();
+const BOARD_APPEARANCE_STORAGE_KEY = "endgame-board-appearance";
+
+function getBoardAppearanceStorageKey(userId: string | null) {
+  return userId ? `${BOARD_APPEARANCE_STORAGE_KEY}:user:${userId}` : BOARD_APPEARANCE_STORAGE_KEY;
+}
 
 async function explainMove(insight: CoachInsight, opening: string) {
   const severity = insight.severity === "good" ? "best" : insight.severity;
@@ -70,25 +86,76 @@ function toApiGameResult(result: "white" | "black" | "draw"): "win" | "loss" | "
   return "draw";
 }
 
-function mapAnalysisToInsights(analysis: ApiGameAnalysis): CoachInsight[] {
-  const severity =
-    analysis.blunders_count > 0
-      ? "blunder"
-      : analysis.mistakes_count > 0
-        ? "mistake"
-        : "best";
+function fromApiGameResult(result: string): "white" | "black" | "draw" {
+  if (result === "win" || result === "white") {
+    return "white";
+  }
+  if (result === "loss" || result === "black") {
+    return "black";
+  }
+  return "draw";
+}
 
-  return [
-    {
-      ply: 1,
-      san: "Game review",
-      bestMove: analysis.best_moves[0] ?? "No suggestion",
-      evaluation: Math.max(0, analysis.best_moves.length * 10),
-      delta: analysis.blunders_count * 100 + analysis.mistakes_count * 40,
-      severity,
-      explanation: analysis.summary,
-    },
-  ];
+const severityWeight: Record<ApiMoveReview["severity"], number> = {
+  blunder: 3,
+  mistake: 2,
+  inaccuracy: 1,
+  best: 0,
+};
+
+function mapAnalysisToInsights(analysis: ApiGameAnalysis): CoachInsight[] {
+  const significantReviews = [...analysis.move_reviews]
+    .filter((review) => review.severity !== "best")
+    .sort(
+      (left, right) =>
+        severityWeight[right.severity] - severityWeight[left.severity] ||
+        right.delta - left.delta ||
+        left.ply - right.ply,
+    );
+  const reviews = significantReviews.length > 0 ? significantReviews : analysis.move_reviews.slice(0, 3);
+
+  return reviews.map((review) => ({
+    ply: review.ply,
+    san: review.san,
+    bestMove: review.best_move,
+    evaluation: review.evaluation,
+    delta: review.delta,
+    severity: review.severity,
+    summary: review.summary,
+    coachExplained: false,
+  }));
+}
+
+function mapApiGameToStoredGame(game: ApiGame, analysis: ApiGameAnalysis | null = null): StoredGame {
+  return {
+    id: game.id,
+    createdAt: game.created_at,
+    mode: game.mode === "multiplayer" ? "online" : "ai",
+    result: fromApiGameResult(game.result),
+    pgn: game.pgn,
+    moves: game.moves,
+    opening: game.opening ?? detectOpening(game.moves),
+    insights: analysis ? mapAnalysisToInsights(analysis) : [],
+  };
+}
+
+function mergeStoredGames(primary: StoredGame[], secondary: StoredGame[]): StoredGame[] {
+  const merged = new Map<string, StoredGame>();
+
+  [...primary, ...secondary].forEach((entry) => {
+    const current = merged.get(entry.id);
+    if (!current) {
+      merged.set(entry.id, entry);
+      return;
+    }
+
+    merged.set(entry.id, {
+      ...entry,
+      insights: current.insights.length > 0 ? current.insights : entry.insights,
+    });
+  });
+
+  return [...merged.values()];
 }
 
 function mapRoomSnapshot(room: ApiMultiplayerRoom): MultiplayerRoomSnapshot {
@@ -123,6 +190,18 @@ function buildGameFromRoom(snapshot: MultiplayerRoomSnapshot) {
 
 function isPlayersTurn(game: Chess, color: PlayerColor | null) {
   return color !== null && game.turn() === (color === "white" ? "w" : "b");
+}
+
+function safeAttemptMove(game: Chess, source: string, target: string) {
+  try {
+    return game.move({
+      from: source as Square,
+      to: target as Square,
+      promotion: "q",
+    });
+  } catch {
+    return null;
+  }
 }
 
 function describeConnection(snapshot: MultiplayerRoomSnapshot) {
@@ -172,6 +251,9 @@ export function useChessGame() {
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const [replayMode, setReplayMode] = useState(false);
+  const [pieceSkin, setPieceSkin] = useState<PieceSkinName>(defaultBoardAppearance.pieceSkin);
+  const [boardTheme, setBoardTheme] = useState<BoardThemeName>(defaultBoardAppearance.boardTheme);
 
   const selectedReplay = useMemo(
     () => gameHistory.find((entry) => entry.id === selectedReplayId) ?? null,
@@ -189,13 +271,24 @@ export function useChessGame() {
     });
     return replayGame.fen();
   }, [selectedReplay, replayPly]);
+  const replayCaptured = useMemo(() => {
+    if (!selectedReplay) {
+      return null;
+    }
+
+    const replayGame = new Chess();
+    selectedReplay.moves.slice(0, replayPly).forEach((move) => {
+      replayGame.move(move);
+    });
+    return getCapturedPieces(replayGame);
+  }, [selectedReplay, replayPly]);
 
   const inviteLink = useMemo(() => {
     if (typeof window === "undefined") {
-      return `/?mode=online&room=${encodeURIComponent(roomCode)}`;
+      return `/game?mode=online&room=${encodeURIComponent(roomCode)}`;
     }
 
-    return `${window.location.origin}/play?mode=online&room=${encodeURIComponent(roomCode)}`;
+    return `${window.location.origin}/game?mode=online&room=${encodeURIComponent(roomCode)}`;
   }, [roomCode]);
 
   const boardStyles = useMemo(() => {
@@ -227,6 +320,14 @@ export function useChessGame() {
   }, [lastMoveSquares, legalTargets, selectedSquare]);
 
   const onlineConnected = connectionState.startsWith("connected");
+  const boardFen = replayMode && replayFen ? replayFen : fen;
+  const displayMoves =
+    replayMode && selectedReplay ? selectedReplay.moves.slice(0, replayPly) : moveHistory;
+  const displayStatus =
+    replayMode && selectedReplay
+      ? `Replay review | ${replayPly}/${selectedReplay.moves.length} plies`
+      : status;
+  const displayCaptured = replayMode && replayCaptured ? replayCaptured : captured;
 
   const syncGameState = useCallback(() => {
     const activeGame = chessRef.current;
@@ -291,12 +392,18 @@ export function useChessGame() {
       getScopedAppStorageKey("history", storageUserId),
       [],
     );
+    const storedAppearance = readStorage(
+      getBoardAppearanceStorageKey(storageUserId),
+      defaultBoardAppearance,
+    );
 
     startTransition(() => {
       setProfile(storedProfile);
       setGameHistory(storedHistory);
       setSelectedReplayId(storedHistory[0]?.id ?? null);
       setReplayPly(storedHistory[0]?.moves.length ?? 0);
+      setPieceSkin(storedAppearance.pieceSkin);
+      setBoardTheme(storedAppearance.boardTheme);
       setHydrated(true);
     });
   }, []);
@@ -316,6 +423,58 @@ export function useChessGame() {
   }, [gameHistory, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    writeStorage(getBoardAppearanceStorageKey(storageUserIdRef.current), {
+      pieceSkin,
+      boardTheme,
+    });
+  }, [boardTheme, hydrated, pieceSkin]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+
+    const pendingReplay = readPendingReplay();
+    if (!pendingReplay) {
+      return;
+    }
+
+    const replayPayload =
+      "replay" in pendingReplay
+        ? pendingReplay
+        : { replay: pendingReplay, ply: 0 };
+
+    clearPendingReplay();
+    queueMicrotask(() => {
+      clearOnlineRoom();
+      chessRef.current = new Chess();
+      clearSelection();
+      setLastMoveSquares([]);
+      syncGameState();
+
+      startTransition(() => {
+        setGameMode("local");
+        setReplayMode(true);
+        setGameHistory((current) => {
+          const existingIndex = current.findIndex((entry) => entry.id === replayPayload.replay.id);
+          if (existingIndex >= 0) {
+            const next = [...current];
+            next[existingIndex] = replayPayload.replay;
+            return next;
+          }
+          return [replayPayload.replay, ...current];
+        });
+        setSelectedReplayId(replayPayload.replay.id);
+        setReplayPly(replayPayload.ply);
+      });
+    });
+  }, [clearOnlineRoom, clearSelection, hydrated, syncGameState]);
+
+  useEffect(() => {
     if (!hydrated || !getAuthToken()) {
       return;
     }
@@ -325,12 +484,14 @@ export function useChessGame() {
     async function syncProfile() {
       try {
         const user = await getProfile();
+        const persistedGames = await getGames();
         if (!active) {
           return;
         }
 
         const nextUserId = user.id;
         const previousUserId = storageUserIdRef.current;
+        const backendHistory = persistedGames.map((game) => mapApiGameToStoredGame(game));
 
         if (previousUserId !== nextUserId) {
           storageUserIdRef.current = nextUserId;
@@ -342,6 +503,15 @@ export function useChessGame() {
             getScopedAppStorageKey("history", nextUserId),
             [],
           );
+          const nextAppearance = readStorage(
+            getBoardAppearanceStorageKey(nextUserId),
+            defaultBoardAppearance,
+          );
+          const mergedHistory = mergeStoredGames(nextHistory, backendHistory);
+          const normalizedPieceSkin =
+            !user.is_pro && isPremiumPieceSkin(nextAppearance.pieceSkin)
+              ? defaultBoardAppearance.pieceSkin
+              : nextAppearance.pieceSkin;
 
           startTransition(() => {
             setProfile({
@@ -351,9 +521,11 @@ export function useChessGame() {
               xp: Math.max(nextProfile.xp, user.xp),
               wins: Math.max(nextProfile.wins, user.wins),
             });
-            setGameHistory(nextHistory);
-            setSelectedReplayId(nextHistory[0]?.id ?? null);
-            setReplayPly(nextHistory[0]?.moves.length ?? 0);
+            setGameHistory(mergedHistory);
+            setSelectedReplayId(mergedHistory[0]?.id ?? null);
+            setReplayPly(mergedHistory[0]?.moves.length ?? 0);
+            setPieceSkin(normalizedPieceSkin);
+            setBoardTheme(nextAppearance.boardTheme);
           });
           return;
         }
@@ -365,6 +537,12 @@ export function useChessGame() {
           xp: Math.max(current.xp, user.xp),
           wins: Math.max(current.wins, user.wins),
         }));
+        if (!user.is_pro && isPremiumPieceSkin(pieceSkin)) {
+          setPieceSkin(defaultBoardAppearance.pieceSkin);
+        }
+        setGameHistory((current) => {
+          return mergeStoredGames(current, backendHistory);
+        });
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
           clearAuthSession();
@@ -375,6 +553,8 @@ export function useChessGame() {
             setGameHistory([]);
             setSelectedReplayId(null);
             setReplayPly(0);
+            setPieceSkin(defaultBoardAppearance.pieceSkin);
+            setBoardTheme(defaultBoardAppearance.boardTheme);
           });
           return;
         }
@@ -387,7 +567,7 @@ export function useChessGame() {
     return () => {
       active = false;
     };
-  }, [clearOnlineRoom, hydrated]);
+  }, [clearOnlineRoom, hydrated, pieceSkin]);
 
   useEffect(() => {
     if (!hydrated || typeof window === "undefined") {
@@ -513,6 +693,45 @@ export function useChessGame() {
     [profile.isPro, updateProfileFromResult],
   );
 
+  const loadReplayInsights = useCallback(
+    async (replay: StoredGame) => {
+      if (replay.insights.length > 0) {
+        return replay;
+      }
+      if (!getAuthToken() || !profile.isPro) {
+        return replay;
+      }
+
+      try {
+        const analysis = await getGameAnalysis(replay.id);
+        const enriched = {
+          ...replay,
+          insights: mapAnalysisToInsights(analysis),
+        };
+        setGameHistory((current) =>
+          current.map((entry) => (entry.id === replay.id ? enriched : entry)),
+        );
+        return enriched;
+      } catch {
+        try {
+          const analysis = await analyzeGame({ pgn: replay.pgn });
+          const enriched = {
+            ...replay,
+            insights: mapAnalysisToInsights(analysis),
+          };
+          setGameHistory((current) =>
+            current.map((entry) => (entry.id === replay.id ? enriched : entry)),
+          );
+          return enriched;
+        } catch (fallbackError) {
+          console.error("Failed to load replay insights", fallbackError);
+          return replay;
+        }
+      }
+    },
+    [profile.isPro],
+  );
+
   const finalizeGame = useCallback(
     async (resultOverride?: "white" | "black" | "draw") => {
       const activeGame = chessRef.current;
@@ -602,21 +821,33 @@ export function useChessGame() {
       if (gameMode === "online" && !onlineConnected) {
         return false;
       }
+      if (replayMode) {
+        return false;
+      }
 
       const activeGame = chessRef.current;
+      const sourcePiece = activeGame.get(source as Square);
+
+      if (!sourcePiece || sourcePiece.color !== activeGame.turn()) {
+        clearSelection();
+        return false;
+      }
 
       if (gameMode === "online") {
         const assignedColor = roomStateRef.current?.assignedColor ?? null;
         if (!isPlayersTurn(activeGame, assignedColor)) {
+          clearSelection();
           return false;
         }
 
-        const probe = activeGame.move({
-          from: source as Square,
-          to: target as Square,
-          promotion: "q",
-        });
+        if (sourcePiece.color !== (assignedColor === "white" ? "w" : "b")) {
+          clearSelection();
+          return false;
+        }
+
+        const probe = safeAttemptMove(activeGame, source, target);
         if (!probe) {
+          clearSelection();
           return false;
         }
 
@@ -633,13 +864,10 @@ export function useChessGame() {
         return false;
       }
 
-      const moved = activeGame.move({
-        from: source as Square,
-        to: target as Square,
-        promotion: "q",
-      });
+      const moved = safeAttemptMove(activeGame, source, target);
 
       if (!moved) {
+        clearSelection();
         return false;
       }
 
@@ -667,6 +895,7 @@ export function useChessGame() {
       onlineConnected,
       play,
       playAiResponse,
+      replayMode,
       syncGameState,
     ],
   );
@@ -675,6 +904,11 @@ export function useChessGame() {
     (square: string) => {
       const activeGame = chessRef.current;
       const assignedColor = roomStateRef.current?.assignedColor ?? null;
+
+      if (replayMode) {
+        clearSelection();
+        return;
+      }
 
       if (selectedSquare && legalTargets.includes(square)) {
         void makeMove(selectedSquare, square);
@@ -699,11 +933,11 @@ export function useChessGame() {
           .map((move) => move.to),
       );
     },
-    [clearSelection, gameMode, legalTargets, makeMove, selectedSquare],
+    [clearSelection, gameMode, legalTargets, makeMove, replayMode, selectedSquare],
   );
 
   const undoMove = useCallback(() => {
-    if (gameMode === "online") {
+    if (gameMode === "online" || replayMode) {
       return;
     }
 
@@ -713,9 +947,13 @@ export function useChessGame() {
     }
     clearSelection();
     syncGameState();
-  }, [clearSelection, gameMode, syncGameState]);
+  }, [clearSelection, gameMode, replayMode, syncGameState]);
 
   const resignGame = useCallback(() => {
+    if (replayMode) {
+      return;
+    }
+
     if (gameMode === "online") {
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         socketRef.current.send(JSON.stringify({ type: "resign" }));
@@ -728,7 +966,7 @@ export function useChessGame() {
     clearSelection();
     setLastMoveSquares([]);
     syncGameState();
-  }, [clearSelection, finalizeGame, gameMode, syncGameState]);
+  }, [clearSelection, finalizeGame, gameMode, replayMode, syncGameState]);
 
   const resetBoard = useCallback(
     (nextMode: GameMode = gameMode) => {
@@ -738,6 +976,7 @@ export function useChessGame() {
 
       chessRef.current = new Chess();
       setGameMode(nextMode);
+      setReplayMode(false);
       setLastMoveSquares([]);
       setSelectedReplayId(null);
       setReplayPly(0);
@@ -746,6 +985,51 @@ export function useChessGame() {
     },
     [clearOnlineRoom, clearSelection, gameMode, syncGameState],
   );
+
+  const openReplay = useCallback(
+    (replayId: string, ply?: number) => {
+      const targetReplay = gameHistory.find((entry) => entry.id === replayId);
+      if (!targetReplay) {
+        return;
+      }
+
+      clearOnlineRoom();
+      chessRef.current = new Chess();
+      clearSelection();
+      setLastMoveSquares([]);
+      syncGameState();
+
+      startTransition(() => {
+        setGameMode("local");
+        setReplayMode(true);
+        setSelectedReplayId(replayId);
+        setReplayPly(ply ?? 0);
+      });
+
+      if (targetReplay.insights.length === 0) {
+        void loadReplayInsights(targetReplay);
+      }
+    },
+    [clearOnlineRoom, clearSelection, gameHistory, loadReplayInsights, syncGameState],
+  );
+
+  const stepReplayBackward = useCallback(() => {
+    if (!replayMode || !selectedReplay) {
+      return;
+    }
+
+    clearSelection();
+    setReplayPly((current) => Math.max(0, current - 1));
+  }, [clearSelection, replayMode, selectedReplay]);
+
+  const stepReplayForward = useCallback(() => {
+    if (!replayMode || !selectedReplay) {
+      return;
+    }
+
+    clearSelection();
+    setReplayPly((current) => Math.min(selectedReplay.moves.length, current + 1));
+  }, [clearSelection, replayMode, selectedReplay]);
 
   const openRoomSocket = useCallback(
     (snapshot: MultiplayerRoomSnapshot) => {
@@ -757,7 +1041,7 @@ export function useChessGame() {
 
       const wsUrl =
         process.env.NEXT_PUBLIC_CHESS_WS_URL ??
-        process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/^http/, "ws").replace(/\/api$/, "");
+        process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/^http/, "ws");
       if (!wsUrl) {
         setConnectionState("configure NEXT_PUBLIC_CHESS_WS_URL");
         return;
@@ -934,21 +1218,35 @@ export function useChessGame() {
       return;
     }
 
-    const targetInsight = selectedReplay.insights[0];
-    if (!targetInsight || targetInsight.explanation) {
+    const replayWithInsights =
+      selectedReplay.insights.length > 0
+        ? selectedReplay
+        : await loadReplayInsights(selectedReplay);
+
+    const targetInsight =
+      replayWithInsights.insights.find(
+        (insight) => !insight.coachExplained && insight.severity !== "best",
+      ) ??
+      replayWithInsights.insights.find((insight) => !insight.coachExplained) ??
+      null;
+    if (!targetInsight || targetInsight.coachExplained) {
       return;
     }
 
     try {
-      const response = await explainMove(targetInsight, selectedReplay.opening);
+      const response = await explainMove(targetInsight, replayWithInsights.opening);
       setGameHistory((current) =>
         current.map((entry) =>
-          entry.id === selectedReplay.id
+          entry.id === replayWithInsights.id
             ? {
                 ...entry,
-                insights: entry.insights.map((insight, index) =>
-                  index === 0
-                    ? { ...insight, explanation: response.explanation }
+                insights: entry.insights.map((insight) =>
+                  insight.ply === targetInsight.ply && insight.san === targetInsight.san
+                    ? {
+                        ...insight,
+                        explanation: response.explanation,
+                        coachExplained: true,
+                      }
                     : insight,
                 ),
               }
@@ -963,7 +1261,7 @@ export function useChessGame() {
       }
       console.error("Failed to request explanation", error);
     }
-  }, [profile.isPro, selectedReplay]);
+  }, [loadReplayInsights, profile.isPro, selectedReplay]);
 
   const closeUpgradeModal = useCallback(() => {
     setUpgradeModalOpen(false);
@@ -973,6 +1271,24 @@ export function useChessGame() {
   const openUpgradeModal = useCallback(() => {
     setUpgradeError(null);
     setUpgradeModalOpen(true);
+  }, []);
+
+  const requestPieceSkin = useCallback(
+    (nextPieceSkin: PieceSkinName) => {
+      if (nextPieceSkin === pieceSkin) {
+        return;
+      }
+      if (isPremiumPieceSkin(nextPieceSkin) && !profile.isPro) {
+        openUpgradeModal();
+        return;
+      }
+      setPieceSkin(nextPieceSkin);
+    },
+    [openUpgradeModal, pieceSkin, profile.isPro],
+  );
+
+  const requestBoardTheme = useCallback((nextBoardTheme: BoardThemeName) => {
+    setBoardTheme(nextBoardTheme);
   }, []);
 
   const handleUpgrade = useCallback(async () => {
@@ -1003,10 +1319,15 @@ export function useChessGame() {
     profile,
     setProfile,
     fen,
+    boardFen,
     moveHistory,
+    displayMoves,
     status,
+    displayStatus,
     orientation,
     setOrientation,
+    pieceSkin,
+    boardTheme,
     difficulty,
     setDifficulty,
     gameMode,
@@ -1017,6 +1338,7 @@ export function useChessGame() {
     replayPly,
     setReplayPly,
     replayFen,
+    replayMode,
     selectedReplay,
     aiThinking,
     analysisBusy,
@@ -1030,6 +1352,7 @@ export function useChessGame() {
     stockfishError,
     boardStyles,
     captured,
+    displayCaptured,
     hydrated,
     upgradeModalOpen,
     upgradeBusy,
@@ -1039,9 +1362,14 @@ export function useChessGame() {
     undoMove,
     resetBoard,
     resignGame,
+    openReplay,
+    stepReplayBackward,
+    stepReplayForward,
     createRoom,
     connectRoom,
     requestExplanation,
+    requestPieceSkin,
+    requestBoardTheme,
     openUpgradeModal,
     closeUpgradeModal,
     handleUpgrade,

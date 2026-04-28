@@ -11,7 +11,7 @@ from app.db import get_db_session
 from app.main import app
 from app.middleware.rate_limit import in_memory_rate_limiter
 from app.models import Game, User
-from app.persistence_schemas import AuthResponse, CoachInsightRead, GameRead, UserRead
+from app.persistence_schemas import AuthResponse, CoachInsightRead, GameRead, MoveReview, UserRead
 from app.services.persistence.auth import create_access_token
 from app.services.persistence.exceptions import InvalidCredentialsError
 
@@ -295,6 +295,17 @@ class AuthApiTests(TestCase):
             mistakes_count=0,
             blunders_count=0,
             best_moves=["Nf3", "O-O"],
+            move_reviews=[
+                MoveReview(
+                    ply=1,
+                    san="e4",
+                    best_move="e4",
+                    severity="best",
+                    evaluation=120,
+                    delta=0,
+                    summary="e4 is a solid choice here.",
+                )
+            ],
         )
 
         with (
@@ -310,6 +321,7 @@ class AuthApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["summary"], saved_insight.summary)
         self.assertEqual(response.json()["best_moves"], ["Nf3", "O-O"])
+        self.assertEqual(response.json()["move_reviews"][0]["san"], "e4")
         save_insight.assert_awaited_once()
 
     def test_get_game_analysis_returns_saved_insight_for_owner(self) -> None:
@@ -328,6 +340,17 @@ class AuthApiTests(TestCase):
             mistakes_count=1,
             blunders_count=0,
             best_moves=["Nf3"],
+            move_reviews=[
+                MoveReview(
+                    ply=2,
+                    san="d5",
+                    best_move="Nf3",
+                    severity="mistake",
+                    evaluation=15,
+                    delta=120,
+                    summary="d5 misses cleaner development.",
+                )
+            ],
         )
         self.session.get.side_effect = [user, game]
 
@@ -343,6 +366,63 @@ class AuthApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["game_id"], str(game_id))
         self.assertEqual(response.json()["summary"], "Stored analysis")
+        self.assertEqual(response.json()["move_reviews"][0]["ply"], 2)
+
+    def test_get_game_analysis_generates_insight_when_missing(self) -> None:
+        user_id = uuid4()
+        game_id = uuid4()
+        token = create_access_token(str(user_id))
+        user = User(email="player@example.com", hashed_password="stored-hash", is_pro=True, xp=0, wins=0)
+        user.id = user_id
+        user.created_at = datetime.now(UTC)
+        game = Game(
+            user_id=user_id,
+            pgn="1. e4 e5 2. Qh5 Nc6 3. Qh6 Nxh6 4. Ke2 a5 5. Kf3 a4 6. Ke4 Ng4 7. Kf5 d5#",
+            moves=["e4", "e5", "Qh5", "Nc6", "Qh6", "Nxh6", "Ke2", "a5", "Kf3", "a4", "Ke4", "Ng4", "Kf5", "d5#"],
+            result="loss",
+            mode="ai",
+        )
+        game.id = game_id
+        generated_insight = CoachInsightRead(
+            id=uuid4(),
+            game_id=game_id,
+            summary="Generated analysis",
+            mistakes_count=2,
+            blunders_count=3,
+            best_moves=["d4", "Nf3"],
+            move_reviews=[
+                MoveReview(
+                    ply=3,
+                    san="Qh6",
+                    best_move="Nf3",
+                    severity="blunder",
+                    evaluation=-180,
+                    delta=240,
+                    summary="Qh6 is too ambitious here.",
+                )
+            ],
+        )
+        self.session.get.side_effect = [user, game]
+
+        with (
+            patch("app.middleware.pro_access.resolve_authenticated_user", AsyncMock(return_value=user)),
+            patch("app.api.get_coach_insight_by_game_id", AsyncMock(return_value=None)),
+            patch("app.api.save_coach_insight", AsyncMock(return_value=generated_insight)) as save_insight,
+        ):
+            response = self.client.get(
+                f"/api/games/{game_id}/analysis",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["summary"], "Generated analysis")
+        self.assertEqual(response.json()["move_reviews"][0]["san"], "Qh6")
+        save_insight.assert_awaited_once()
+        payload = save_insight.await_args.args[1]
+        self.assertEqual(payload.game_id, game_id)
+        self.assertGreaterEqual(payload.blunders_count, 1)
+        self.assertGreaterEqual(len(payload.best_moves), 1)
+        self.assertGreaterEqual(len(payload.move_reviews), 1)
 
     def test_analyze_game_rejects_foreign_game_id(self) -> None:
         user_id = uuid4()

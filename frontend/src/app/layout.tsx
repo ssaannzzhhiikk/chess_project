@@ -18,6 +18,11 @@ export const metadata: Metadata = {
   title: "Endgame | Modern Chess Platform",
   description:
     "A product-grade chess app with Stockfish play, AI coaching, replay, leaderboards, and progression.",
+  icons: {
+    icon: "/Chess_pawn.svg",
+    shortcut: "/Chess_pawn.svg",
+    apple: "/Chess_pawn.svg",
+  },
 };
 
 export default function RootLayout({

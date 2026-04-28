@@ -40,12 +40,9 @@ create table if not exists games (
 create table if not exists coach_insights (
   id uuid primary key,
   game_id uuid not null references games(id) on delete cascade,
-  ply integer not null,
-  san varchar(32) not null,
-  severity varchar(16) not null,
-  best_move varchar(16) not null,
-  evaluation integer not null,
-  delta integer not null,
-  explanation text
+  summary text not null,
+  mistakes_count integer not null default 0,
+  blunders_count integer not null default 0,
+  best_moves jsonb not null default '[]'::jsonb,
+  move_reviews jsonb not null default '[]'::jsonb
 );
-

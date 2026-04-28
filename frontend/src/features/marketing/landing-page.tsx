@@ -22,7 +22,7 @@ export function LandingPage() {
             Endgame blends fast play, Stockfish strength, AI explanations, product-grade replay, and progression systems into one polished experience.
           </p>
           <div className="flex flex-wrap gap-3">
-            <Link href="/play">
+            <Link href="/game">
               <Button size="lg">Play Now</Button>
             </Link>
             <Link href="/analysis">

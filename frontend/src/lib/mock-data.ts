@@ -74,7 +74,7 @@ export const achievements: Record<string, Achievement> = {
 };
 
 export const navLinks = [
-  { href: "/play", label: "Play" },
+  { href: "/game", label: "Play" },
   { href: "/analysis", label: "Analysis" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/profile", label: "Profile" },

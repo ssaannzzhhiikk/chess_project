@@ -24,6 +24,7 @@ async def save_coach_insight(
             mistakes_count=payload.mistakes_count,
             blunders_count=payload.blunders_count,
             best_moves=payload.best_moves,
+            move_reviews=[review.model_dump() for review in payload.move_reviews],
         )
         session.add(insight)
     else:
@@ -31,6 +32,7 @@ async def save_coach_insight(
         insight.mistakes_count = payload.mistakes_count
         insight.blunders_count = payload.blunders_count
         insight.best_moves = payload.best_moves
+        insight.move_reviews = [review.model_dump() for review in payload.move_reviews]
 
     await session.flush()
     await session.commit()

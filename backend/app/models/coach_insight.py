@@ -24,5 +24,6 @@ class CoachInsight(Base):
     mistakes_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     blunders_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     best_moves: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    move_reviews: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
 
     game: Mapped["Game"] = relationship(back_populates="coach_insights")

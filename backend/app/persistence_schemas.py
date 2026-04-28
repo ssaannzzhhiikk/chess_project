@@ -14,6 +14,7 @@ JSONList = list[str | dict[str, Any]]
 RoomStatus = Literal["waiting", "active", "finished"]
 PlayerColor = Literal["white", "black"]
 GameOutcome = Literal["white", "black", "draw"]
+MoveReviewSeverity = Literal["best", "inaccuracy", "mistake", "blunder"]
 
 
 class PersistenceSchema(BaseModel):
@@ -108,12 +109,23 @@ class ProfileRead(BaseModel):
     recent_games: list[GameRead]
 
 
+class MoveReview(BaseModel):
+    ply: int = Field(ge=1)
+    san: str = Field(min_length=1)
+    best_move: str = Field(min_length=1)
+    severity: MoveReviewSeverity
+    evaluation: int
+    delta: int = Field(ge=0)
+    summary: str = Field(min_length=1)
+
+
 class CoachInsightCreate(BaseModel):
     game_id: UUID
     summary: str = Field(min_length=1)
     mistakes_count: int = Field(default=0, ge=0)
     blunders_count: int = Field(default=0, ge=0)
     best_moves: JSONList = Field(default_factory=list)
+    move_reviews: list[MoveReview] = Field(default_factory=list)
 
 
 class CoachInsightRead(PersistenceSchema):
@@ -123,6 +135,7 @@ class CoachInsightRead(PersistenceSchema):
     mistakes_count: int
     blunders_count: int
     best_moves: JSONList
+    move_reviews: list[MoveReview] = Field(default_factory=list)
 
 
 class AnalyzeGameRequest(BaseModel):
@@ -141,6 +154,7 @@ class AnalyzeGameResponse(BaseModel):
     mistakes_count: int = Field(default=0, ge=0)
     blunders_count: int = Field(default=0, ge=0)
     best_moves: list[str] = Field(default_factory=list)
+    move_reviews: list[MoveReview] = Field(default_factory=list)
 
 
 class UpgradeResponse(BaseModel):

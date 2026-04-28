@@ -9,14 +9,14 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const variants = {
   primary:
-    "bg-[var(--accent)] text-[var(--accent-foreground)] shadow-[0_18px_45px_rgba(0,0,0,0.18)] hover:brightness-110",
+    "border border-transparent bg-[var(--accent)] text-[var(--accent-foreground)] shadow-sm hover:bg-[var(--accent-hover)]",
   secondary:
-    "border border-[var(--border-strong)] bg-white/5 text-[var(--foreground)] hover:border-[var(--accent)] hover:bg-white/8",
-  ghost: "text-[var(--muted)] hover:bg-white/6 hover:text-[var(--foreground)]",
+    "border border-[var(--border-strong)] bg-[var(--surface-strong)] text-[var(--foreground)] hover:border-[var(--accent)] hover:bg-[var(--surface)]",
+  ghost: "border border-transparent bg-transparent text-[var(--muted)] hover:bg-[var(--surface-strong)] hover:text-[var(--foreground)]",
 };
 
 const sizes = {
-  sm: "h-9 px-3 text-sm",
+  sm: "h-10 px-4 text-sm",
   md: "h-11 px-4 text-sm",
   lg: "h-12 px-5 text-base",
 };
@@ -30,9 +30,8 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-full font-medium transition duration-200 disabled:pointer-events-none disabled:opacity-50",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60",
-        "active:scale-[0.98]",
+        "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
         variants[variant],
         sizes[size],
         className,
@@ -41,4 +40,3 @@ export function Button({
     />
   );
 }
-
