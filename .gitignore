@@ -1,36 +1,34 @@
-frontend/.next/
-frontend/node_modules/
-frontend/.env.local
-frontend/.env
-backend/.venv/
-backend/__pycache__/
-backend/.env
-backend/.pytest_cache/
-backend/.env.example
-
-# Python
+# ========================
+# Backend (Python)
+# ========================
 backend/.venv/
 backend/__pycache__/
 backend/*.pyc
-
-# Pip temp (у тебя уже есть)
+backend/.pytest_cache/
 backend/.pip-temp/
 
-# Env files
-backend/.env
-frontend/.env.local
-
-# Node
+# ========================
+# Frontend (Next.js)
+# ========================
 frontend/node_modules/
 frontend/.next/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 
-# OS
-.DS_Store
-Thumbs.db
+# ========================
+# Environment files (НЕ коммитим)
+# ========================
+backend/.env
+frontend/.env
+frontend/.env.local
 
+# ========================
 # Logs
+# ========================
 *.log
 
-# TypeScript cache
-frontend/tsconfig.tsbuildinfo
+# ========================
+# OS
+# ========================
+.DS_Store
+Thumbs.db
