@@ -1,18 +1,122 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { EvaluationBar } from "@/components/chess/evaluation-bar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/skeleton-card";
-import { useMockLoading } from "@/hooks/use-mock-loading";
-import { analysisRows, analysisSummary } from "@/lib/mock-data";
+import { ApiError, ApiGame, clearAuthToken, getAuthToken, getGames, getProfile } from "@/lib/api";
+
+type HistoryRow = {
+  id: string;
+  ply: number;
+  move: string;
+  quality: string;
+  eval: string;
+  explanation: string;
+  bestMove: string;
+};
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(value));
+}
+
+function mapGamesToRows(games: ApiGame[]): HistoryRow[] {
+  return games.map((game, index) => ({
+    id: game.id,
+    ply: index + 1,
+    move: game.opening || (game.mode === "ai" ? "AI match" : "Multiplayer match"),
+    quality:
+      game.result === "win" || game.result === "white"
+        ? "Win"
+        : game.result === "loss" || game.result === "black"
+          ? "Loss"
+          : "Draw",
+    eval: `${game.moves.length} moves`,
+    explanation:
+      game.pgn.trim() || `Finished on ${formatDate(game.created_at)} in ${game.mode} mode.`,
+    bestMove: game.moves.at(-1) || "No move recorded",
+  }));
+}
 
 export function AnalysisPage() {
-  const loading = useMockLoading();
-  const [selected, setSelected] = useState(analysisRows[0]);
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!getAuthToken()) {
+      router.replace("/login");
+      return;
+    }
+
+    let active = true;
+
+    async function loadHistory() {
+      try {
+        const user = await getProfile();
+        const games = await getGames(user.id);
+        const nextRows = mapGamesToRows(games);
+
+        if (!active) {
+          return;
+        }
+
+        setRows(nextRows);
+        setSelectedId(nextRows[0]?.id ?? null);
+      } catch (cause) {
+        if (!active) {
+          return;
+        }
+
+        if (cause instanceof ApiError && cause.status === 401) {
+          clearAuthToken();
+          router.replace("/login");
+          return;
+        }
+
+        setError("Unable to load match history right now.");
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadHistory();
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
+  const selected = useMemo(
+    () => rows.find((row) => row.id === selectedId) ?? rows[0] ?? null,
+    [rows, selectedId],
+  );
+  const summary = useMemo(() => {
+    const wins = rows.filter((row) => row.quality === "Win").length;
+    const losses = rows.filter((row) => row.quality === "Loss").length;
+    const draws = rows.filter((row) => row.quality === "Draw").length;
+
+    return {
+      accuracy: rows.length ? Math.round((wins / rows.length) * 100) : 0,
+      blunders: losses,
+      mistakes: draws,
+      bestMoves: wins,
+    };
+  }, [rows]);
 
   return (
     <div className="space-y-6">
@@ -31,10 +135,10 @@ export function AnalysisPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            { label: "Accuracy", value: `${analysisSummary.accuracy}%` },
-            { label: "Blunders", value: `${analysisSummary.blunders}` },
-            { label: "Mistakes", value: `${analysisSummary.mistakes}` },
-            { label: "Best moves", value: `${analysisSummary.bestMoves}` },
+            { label: "Accuracy", value: `${summary.accuracy}%` },
+            { label: "Blunders", value: `${summary.blunders}` },
+            { label: "Mistakes", value: `${summary.mistakes}` },
+            { label: "Best moves", value: `${summary.bestMoves}` },
           ].map((item) => (
             <Card key={item.label}>
               <CardContent>
@@ -50,7 +154,7 @@ export function AnalysisPage() {
         <Card>
           <CardContent className="grid gap-6 lg:grid-cols-[52px_minmax(0,1fr)]">
             <div className="hidden justify-center lg:flex">
-              <EvaluationBar value={selected.eval.startsWith("-") ? -1 : 1} />
+              <EvaluationBar value={selected?.quality === "Loss" ? -1 : 1} />
             </div>
             <div className="space-y-3">
               {loading ? (
@@ -58,16 +162,16 @@ export function AnalysisPage() {
                   <SkeletonCard lines={6} />
                   <SkeletonCard lines={6} />
                 </>
-              ) : (
-                analysisRows.map((row) => (
+              ) : rows.length ? (
+                rows.map((row) => (
                   <button
-                    key={`${row.ply}-${row.move}`}
+                    key={row.id}
                     className={`w-full rounded-[24px] border p-4 text-left transition ${
-                      selected.ply === row.ply
+                      selected?.id === row.id
                         ? "border-[var(--accent)] bg-white/7"
                         : "border-white/8 bg-white/4"
                     }`}
-                    onClick={() => setSelected(row)}
+                    onClick={() => setSelectedId(row.id)}
                     type="button"
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -84,6 +188,12 @@ export function AnalysisPage() {
                     </div>
                   </button>
                 ))
+              ) : (
+                <EmptyState
+                  title="No saved games yet"
+                  description="Finish a game and your backend match history will show up here."
+                  label="History"
+                />
               )}
             </div>
           </CardContent>
@@ -94,7 +204,13 @@ export function AnalysisPage() {
             <Badge>Selected position</Badge>
             {loading ? (
               <SkeletonCard lines={5} />
-            ) : (
+            ) : error ? (
+              <EmptyState
+                title="History unavailable"
+                description={error}
+                label="Backend"
+              />
+            ) : selected ? (
               <>
                 <h3 className="text-2xl font-semibold">
                   {selected.quality}: {selected.move}
@@ -118,11 +234,22 @@ export function AnalysisPage() {
                   </button>
                 </div>
               </>
+            ) : (
+              <EmptyState
+                title="No analysis history yet"
+                description="Your recent completed games will appear here once the backend has history to return."
+                label="History"
+              />
             )}
           </CardContent>
         </Card>
       </div>
+
+      {!loading && !rows.length ? (
+        <Link href="/play">
+          <Button>Start a game</Button>
+        </Link>
+      ) : null}
     </div>
   );
 }
-

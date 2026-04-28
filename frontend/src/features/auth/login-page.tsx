@@ -1,10 +1,41 @@
+"use client";
+
 import Link from "next/link";
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ApiError, login, setAuthToken } from "@/lib/api";
 
 export function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const response = await login(email, password);
+      setAuthToken(response.access_token);
+      router.push("/profile");
+    } catch (cause) {
+      if (cause instanceof ApiError) {
+        setError(cause.message);
+      } else {
+        setError("Unable to sign in right now.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
@@ -20,19 +51,28 @@ export function LoginPage() {
             <p className="text-sm leading-7 text-[var(--muted)]">
               Sign in to continue your chess training loop and unlock synced replays, progress, and Pro analysis.
             </p>
-            <div className="space-y-3">
-              <input
-                className="w-full rounded-[20px] border border-white/10 bg-white/4 px-4 py-3 outline-none"
-                placeholder="Email"
-                type="email"
-              />
-              <input
-                className="w-full rounded-[20px] border border-white/10 bg-white/4 px-4 py-3 outline-none"
-                placeholder="Password"
-                type="password"
-              />
-            </div>
-            <Button className="w-full">Login</Button>
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              <div className="space-y-3">
+                <input
+                  className="w-full rounded-[20px] border border-white/10 bg-white/4 px-4 py-3 outline-none"
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="Email"
+                  type="email"
+                  value={email}
+                />
+                <input
+                  className="w-full rounded-[20px] border border-white/10 bg-white/4 px-4 py-3 outline-none"
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Password"
+                  type="password"
+                  value={password}
+                />
+              </div>
+              {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+              <Button className="w-full" disabled={submitting} type="submit">
+                {submitting ? "Signing in..." : "Login"}
+              </Button>
+            </form>
             <Button className="w-full" variant="secondary">
               Continue with Google
             </Button>
@@ -58,4 +98,3 @@ export function LoginPage() {
     </div>
   );
 }
-

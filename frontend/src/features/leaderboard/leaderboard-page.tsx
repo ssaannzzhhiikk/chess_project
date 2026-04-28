@@ -1,36 +1,47 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { PageHeader } from "@/components/layout/page-header";
+import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/skeleton-card";
 import { TableTabs } from "@/components/ui/table-tabs";
-import { useMockLoading } from "@/hooks/use-mock-loading";
-import { defaultProfile, leaderboardSeed } from "@/lib/mock-data";
+import { ApiLeaderboardEntry, getLeaderboard } from "@/lib/api";
 
 export function LeaderboardPage() {
-  const loading = useMockLoading();
+  const [entriesSeed, setEntriesSeed] = useState<ApiLeaderboardEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("Global");
 
-  const entries = useMemo(() => {
-    const combined = [
-      ...leaderboardSeed,
-      {
-        username: defaultProfile.username,
-        city: defaultProfile.city,
-        rating: defaultProfile.rating,
-        xp: defaultProfile.xp,
-        wins: defaultProfile.wins,
-        losses: defaultProfile.losses,
-        level: defaultProfile.level,
-      },
-    ];
+  useEffect(() => {
+    let active = true;
 
+    async function loadLeaderboard() {
+      try {
+        const leaderboard = await getLeaderboard();
+        if (active) {
+          setEntriesSeed(leaderboard);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadLeaderboard();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const entries = useMemo(() => {
     const filtered =
       tab === "Friends"
-        ? combined.filter((entry) => ["Mira", "Lina", "Noor"].includes(entry.username))
-        : combined;
+        ? entriesSeed.filter((entry) => ["Mira", "Lina", "Noor"].includes(entry.username))
+        : entriesSeed;
 
     return filtered
       .sort((left, right) => right.rating - left.rating)
@@ -39,7 +50,7 @@ export function LeaderboardPage() {
         rank: index + 1,
         winRate: Math.round((entry.wins / Math.max(1, entry.wins + entry.losses)) * 100),
       }));
-  }, [tab]);
+  }, [entriesSeed, tab]);
 
   return (
     <div className="space-y-6">
@@ -74,8 +85,17 @@ export function LeaderboardPage() {
         )}
       </div>
 
-      {loading ? <SkeletonCard lines={8} /> : <LeaderboardTable entries={entries} />}
+      {loading ? (
+        <SkeletonCard lines={8} />
+      ) : entries.length ? (
+        <LeaderboardTable entries={entries} />
+      ) : (
+        <EmptyState
+          title="No leaderboard entries yet"
+          description="Play a few games and this table will start filling with live backend rankings."
+          label="Waiting for data"
+        />
+      )}
     </div>
   );
 }
-
