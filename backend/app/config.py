@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "replace-me"
     openai_api_key: str = ""
     cors_origins: str = "http://localhost:3000"
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/chess_app"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/chess_app"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

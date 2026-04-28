@@ -18,6 +18,7 @@ async def create_user(session: AsyncSession, payload: UserCreate) -> UserRead:
         hashed_password=hash_password(payload.password),
     )
     session.add(user)
+    await session.flush()
     await session.commit()
     await session.refresh(user)
     return UserRead.model_validate(user)

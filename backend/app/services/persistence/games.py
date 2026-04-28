@@ -21,6 +21,7 @@ async def create_game(session: AsyncSession, payload: GameCreate) -> GameRead:
         mode=payload.mode,
     )
     session.add(game)
+    await session.flush()
     await session.commit()
     await session.refresh(game)
     return GameRead.model_validate(game)

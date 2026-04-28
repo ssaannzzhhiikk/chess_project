@@ -21,5 +21,7 @@ async def save_coach_insight(
         best_moves=payload.best_moves,
     )
     session.add(insight)
+    await session.flush()
     await session.commit()
+    await session.refresh(insight)
     return CoachInsightRead.model_validate(insight)

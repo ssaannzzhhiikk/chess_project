@@ -16,9 +16,11 @@ from app.services.persistence.users import create_user
 class CreateUserServiceTests(IsolatedAsyncioTestCase):
     async def test_create_user_hashes_password(self) -> None:
         session = AsyncMock()
+        session.add = Mock()
         session.scalar.return_value = None
 
         async def refresh_user(user: User) -> None:
+            user.id = uuid4()
             user.created_at = datetime.now(UTC)
 
         session.refresh.side_effect = refresh_user
@@ -32,6 +34,7 @@ class CreateUserServiceTests(IsolatedAsyncioTestCase):
         self.assertEqual(created_user.email, "player@example.com")
         self.assertIsNotNone(created_user.id)
         session.add.assert_called_once()
+        session.flush.assert_awaited_once()
         session.commit.assert_awaited_once()
         session.refresh.assert_awaited_once()
 
@@ -70,6 +73,7 @@ class GameServiceTests(IsolatedAsyncioTestCase):
             result="win",
             mode="ai",
         )
+        older_game.id = uuid4()
         older_game.created_at = datetime(2024, 1, 1, tzinfo=UTC)
         newer_game = Game(
             user_id=user_id,
@@ -78,6 +82,7 @@ class GameServiceTests(IsolatedAsyncioTestCase):
             result="loss",
             mode="multiplayer",
         )
+        newer_game.id = uuid4()
         newer_game.created_at = datetime(2024, 1, 2, tzinfo=UTC)
 
         scalars_result = Mock()
@@ -108,6 +113,7 @@ class CoachInsightServiceTests(IsolatedAsyncioTestCase):
 
     async def test_save_coach_insight_persists_record(self) -> None:
         session = AsyncMock()
+        session.add = Mock()
         game = Game(
             user_id=uuid4(),
             pgn="1. e4 e5",
@@ -116,6 +122,11 @@ class CoachInsightServiceTests(IsolatedAsyncioTestCase):
             mode="ai",
         )
         session.get.return_value = game
+
+        async def refresh_insight(insight) -> None:
+            insight.id = uuid4()
+
+        session.refresh.side_effect = refresh_insight
 
         insight = await save_coach_insight(
             session,
@@ -130,5 +141,6 @@ class CoachInsightServiceTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(insight.summary, "Watch the back rank.")
         session.add.assert_called_once()
+        session.flush.assert_awaited_once()
         session.commit.assert_awaited_once()
-        session.refresh.assert_not_called()
+        session.refresh.assert_awaited_once()
