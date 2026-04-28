@@ -1,4 +1,3 @@
-from collections import defaultdict
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -19,6 +18,7 @@ from .persistence_schemas import (
     GameRead,
     LeaderboardEntryRead,
     LeaderboardSort,
+    MultiplayerRoomRead,
     ProfileRead,
     UpgradeResponse,
     UserCreate,
@@ -29,9 +29,15 @@ from .schemas import (
     CoachExplanationRequest,
     CoachExplanationResponse,
     RoomMove,
+    RoomResignation,
 )
 from .services.coach_service import explain_move
 from .services.game_analysis import analyze_game_content
+from .services.multiplayer import (
+    MultiplayerActionError,
+    MultiplayerSocketError,
+    room_manager,
+)
 from .services.persistence import (
     DuplicateEmailError,
     InvalidCredentialsError,
@@ -48,7 +54,6 @@ from .services.persistence import (
 )
 
 router = APIRouter(prefix="/api")
-connections: dict[str, set[WebSocket]] = defaultdict(set)
 
 
 @router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -102,6 +107,24 @@ async def upgrade_account(
 ) -> UpgradeResponse:
     upgraded_user = await upgrade_user_to_pro(session, current_user)
     return UpgradeResponse(message="Pro access unlocked", user=upgraded_user)
+
+
+@router.post("/multiplayer/rooms", response_model=MultiplayerRoomRead, status_code=status.HTTP_201_CREATED)
+async def create_multiplayer_room(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MultiplayerRoomRead:
+    room = await room_manager.create_room(current_user.id)
+    return await room_manager.get_room_read(room.room_id, current_user.id)
+
+
+@router.post("/multiplayer/rooms/{room_id}/join", response_model=MultiplayerRoomRead)
+async def join_multiplayer_room(
+    room_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MultiplayerRoomRead:
+    room = await room_manager.join_room(room_id, current_user.id)
+    await room_manager.broadcast_room_state(room)
+    return await room_manager.get_room_read(room.room_id, current_user.id)
 
 
 @router.get("/games", response_model=list[GameRead])
@@ -203,16 +226,37 @@ async def coach_explain(
 
 
 @router.websocket("/ws/games/{room_id}")
-async def game_room(websocket: WebSocket, room_id: str) -> None:
-    await websocket.accept()
-    connections[room_id].add(websocket)
+async def game_room(
+    websocket: WebSocket,
+    room_id: str,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> None:
+    token = websocket.query_params.get("token")
+    user = await room_manager.resolve_user(session, token)
+    if user is None:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required")
+        return
+
+    try:
+        await room_manager.connect(room_id, user.id, websocket)
+    except MultiplayerSocketError as exc:
+        await websocket.close(code=exc.code, reason=exc.reason)
+        return
+
     try:
         while True:
             message: dict[str, Any] = await websocket.receive_json()
-            room_move = RoomMove.model_validate(message)
-            for peer in list(connections[room_id]):
-                if peer is websocket:
-                    continue
-                await peer.send_json(room_move.model_dump())
+            message_type = message.get("type", "move")
+
+            try:
+                if message_type == "move":
+                    await room_manager.process_move(session, room_id, user.id, RoomMove.model_validate(message))
+                elif message_type == "resign":
+                    RoomResignation.model_validate(message)
+                    await room_manager.process_resignation(session, room_id, user.id)
+                else:
+                    await room_manager.send_error(websocket, "Unsupported room event.")
+            except MultiplayerActionError as exc:
+                await room_manager.send_error(websocket, str(exc))
     except WebSocketDisconnect:
-        connections[room_id].discard(websocket)
+        await room_manager.disconnect(room_id, user.id, websocket)

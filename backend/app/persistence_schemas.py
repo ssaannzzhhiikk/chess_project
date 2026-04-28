@@ -11,6 +11,9 @@ GameMode = Literal["ai", "multiplayer"]
 GameResult = Literal["win", "loss", "draw"]
 LeaderboardSort = Literal["xp", "wins"]
 JSONList = list[str | dict[str, Any]]
+RoomStatus = Literal["waiting", "active", "finished"]
+PlayerColor = Literal["white", "black"]
+GameOutcome = Literal["white", "black", "draw"]
 
 
 class PersistenceSchema(BaseModel):
@@ -143,6 +146,21 @@ class AnalyzeGameResponse(BaseModel):
 class UpgradeResponse(BaseModel):
     message: str
     user: UserRead
+
+
+class MultiplayerRoomRead(BaseModel):
+    room_id: str
+    white_player_id: UUID | None
+    black_player_id: UUID | None
+    current_fen: str
+    moves: list[str] = Field(default_factory=list)
+    status: RoomStatus
+    disconnected_players: list[UUID] = Field(default_factory=list)
+    assigned_color: PlayerColor | None = None
+    result: GameOutcome | None = None
+    pgn: str = ""
+    persisted_game_id: UUID | None = None
+    termination: str | None = None
 
 
 class AchievementRead(PersistenceSchema):

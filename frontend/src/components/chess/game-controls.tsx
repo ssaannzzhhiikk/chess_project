@@ -12,6 +12,7 @@ export function GameControls({
   setDifficulty,
   roomCode,
   setRoomCode,
+  createRoom,
   connectRoom,
   connectionState,
   inviteLink,
@@ -25,6 +26,7 @@ export function GameControls({
   setDifficulty: (value: number) => void;
   roomCode: string;
   setRoomCode: (value: string) => void;
+  createRoom: () => void;
   connectRoom: () => void;
   connectionState: string;
   inviteLink: string;
@@ -78,11 +80,15 @@ export function GameControls({
             <input
               className="w-full rounded-2xl border border-white/10 bg-transparent px-3 py-2 text-sm outline-none"
               onChange={(event) => setRoomCode(event.target.value)}
+              placeholder="Enter room code"
               value={roomCode}
             />
             <div className="flex gap-2">
+              <Button onClick={createRoom} size="sm" variant="secondary">
+                Create
+              </Button>
               <Button onClick={connectRoom} size="sm">
-                Connect
+                Join
               </Button>
               <Button
                 onClick={() => navigator.clipboard.writeText(inviteLink)}

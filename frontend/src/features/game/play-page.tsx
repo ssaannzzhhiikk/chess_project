@@ -70,7 +70,9 @@ export function PlayPage() {
                 game.gameMode === "ai"
                   ? `Depth ${game.difficulty}`
                   : game.gameMode === "online"
-                    ? "Connected room player"
+                    ? game.roomState?.assignedColor
+                      ? `${game.roomState.assignedColor} player | ${game.roomState.status}`
+                      : "Room participant"
                     : "Local challenger"
               }
             />
@@ -93,7 +95,7 @@ export function PlayPage() {
               <ChessBoard
                 allowDragging={
                   !game.aiThinking &&
-                  !(game.gameMode === "online" && game.connectionState !== "connected")
+                  !(game.gameMode === "online" && !game.onlineConnected)
                 }
                 boardStyles={game.boardStyles}
                 fen={game.fen}
@@ -123,6 +125,7 @@ export function PlayPage() {
 
         <div className="space-y-6">
           <GameControls
+            createRoom={game.createRoom}
             connectRoom={game.connectRoom}
             connectionState={game.connectionState}
             difficulty={game.difficulty}

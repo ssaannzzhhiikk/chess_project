@@ -2,6 +2,8 @@ export type ThemeMode = "light" | "dark";
 export type GameMode = "local" | "ai" | "online";
 export type GameResult = "white" | "black" | "draw";
 export type InsightSeverity = "best" | "good" | "inaccuracy" | "mistake" | "blunder";
+export type PlayerColor = "white" | "black";
+export type OnlineRoomStatus = "waiting" | "active" | "finished";
 
 export type CoachInsight = {
   ply: number;
@@ -24,3 +26,20 @@ export type StoredGame = {
   insights: CoachInsight[];
 };
 
+export type MultiplayerRoomSnapshot = {
+  roomId: string;
+  currentFen: string;
+  moves: string[];
+  status: OnlineRoomStatus;
+  assignedColor: PlayerColor | null;
+  result: GameResult | null;
+  pgn: string;
+  persistedGameId: string | null;
+  termination: string | null;
+  lastMove: {
+    source: string;
+    target: string;
+    san: string;
+    playerColor: PlayerColor;
+  } | null;
+};

@@ -15,17 +15,28 @@ import { readStorage, writeStorage } from "@/lib/storage";
 import {
   analyzeGame,
   ApiError,
+  createMultiplayerRoom,
   explainCoachMove,
   getAuthToken,
   getProfile,
+  joinMultiplayerRoom,
   saveGame,
+  type ApiMultiplayerRoom,
+  type ApiRoomErrorEvent,
+  type ApiRoomStateEvent,
   type ApiGameAnalysis,
   upgradeToPro,
 } from "@/lib/api";
 import { useStockfish } from "@/hooks/use-stockfish";
 import { useChessSounds } from "@/hooks/use-chess-sounds";
 import { detectOpening, getCapturedPieces, outcome, statusLabel } from "./chess-helpers";
-import type { CoachInsight, GameMode, StoredGame } from "./types";
+import type {
+  CoachInsight,
+  GameMode,
+  MultiplayerRoomSnapshot,
+  PlayerColor,
+  StoredGame,
+} from "./types";
 
 const initialGame = new Chess();
 
@@ -77,9 +88,59 @@ function mapAnalysisToInsights(analysis: ApiGameAnalysis): CoachInsight[] {
   ];
 }
 
+function mapRoomSnapshot(room: ApiMultiplayerRoom): MultiplayerRoomSnapshot {
+  return {
+    roomId: room.room_id,
+    currentFen: room.current_fen,
+    moves: room.moves,
+    status: room.status,
+    assignedColor: room.assigned_color,
+    result: room.result,
+    pgn: room.pgn,
+    persistedGameId: room.persisted_game_id,
+    termination: room.termination,
+    lastMove: room.last_move
+      ? {
+          source: room.last_move.source,
+          target: room.last_move.target,
+          san: room.last_move.san,
+          playerColor: room.last_move.player_color,
+        }
+      : null,
+  };
+}
+
+function buildGameFromRoom(snapshot: MultiplayerRoomSnapshot) {
+  const game = new Chess();
+  snapshot.moves.forEach((move) => {
+    game.move(move);
+  });
+  return game;
+}
+
+function isPlayersTurn(game: Chess, color: PlayerColor | null) {
+  return color !== null && game.turn() === (color === "white" ? "w" : "b");
+}
+
+function describeConnection(snapshot: MultiplayerRoomSnapshot) {
+  const role = snapshot.assignedColor ? `as ${snapshot.assignedColor}` : "to room";
+
+  if (snapshot.status === "waiting") {
+    return `connected ${role} | waiting for opponent`;
+  }
+  if (snapshot.status === "finished") {
+    return `finished ${role} | ${snapshot.result ?? "draw"}`;
+  }
+  return `connected ${role} | live game`;
+}
+
 export function useChessGame() {
   const chessRef = useRef(new Chess());
   const socketRef = useRef<WebSocket | null>(null);
+  const roomStateRef = useRef<MultiplayerRoomSnapshot | null>(null);
+  const finishedRoomRef = useRef<string | null>(null);
+  const autoConnectRoomRef = useRef<string | null>(null);
+  const assignedColorRef = useRef<PlayerColor | null>(null);
   const { analyzePosition, ready: stockfishReady, error: stockfishError } =
     useStockfish();
   const { play } = useChessSounds();
@@ -97,7 +158,8 @@ export function useChessGame() {
   const [aiThinking, setAiThinking] = useState(false);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [connectionState, setConnectionState] = useState("offline");
-  const [roomCode, setRoomCode] = useState("rook-room");
+  const [roomCode, setRoomCode] = useState("");
+  const [roomState, setRoomState] = useState<MultiplayerRoomSnapshot | null>(null);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [legalTargets, setLegalTargets] = useState<string[]>([]);
   const [lastMoveSquares, setLastMoveSquares] = useState<string[]>([]);
@@ -160,6 +222,8 @@ export function useChessGame() {
     return styles;
   }, [lastMoveSquares, legalTargets, selectedSquare]);
 
+  const onlineConnected = connectionState.startsWith("connected");
+
   const syncGameState = useCallback(() => {
     const activeGame = chessRef.current;
     setFen(activeGame.fen());
@@ -172,6 +236,35 @@ export function useChessGame() {
     setSelectedSquare(null);
     setLegalTargets([]);
   }, []);
+
+  const applyOnlineRoomSnapshot = useCallback(
+    (snapshot: MultiplayerRoomSnapshot) => {
+      const previousMoveCount = roomStateRef.current?.moves.length ?? 0;
+      const synced = buildGameFromRoom(snapshot);
+
+      chessRef.current = synced;
+      roomStateRef.current = snapshot;
+      setRoomState(snapshot);
+      setRoomCode(snapshot.roomId);
+      setConnectionState(describeConnection(snapshot));
+      setLastMoveSquares(
+        snapshot.lastMove ? [snapshot.lastMove.source, snapshot.lastMove.target] : [],
+      );
+      clearSelection();
+
+      if (snapshot.assignedColor && assignedColorRef.current !== snapshot.assignedColor) {
+        assignedColorRef.current = snapshot.assignedColor;
+        setOrientation(snapshot.assignedColor);
+      }
+
+      syncGameState();
+
+      if (snapshot.moves.length > previousMoveCount && snapshot.lastMove) {
+        void play(synced.inCheck() ? "check" : "move");
+      }
+    },
+    [clearSelection, play, syncGameState],
+  );
 
   useEffect(() => {
     const storedProfile = readStorage<Profile>(
@@ -236,6 +329,27 @@ export function useChessGame() {
     };
   }, [hydrated]);
 
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const room = params.get("room");
+    const mode = params.get("mode");
+    if (!room) {
+      return;
+    }
+
+    autoConnectRoomRef.current = room;
+    startTransition(() => {
+      setRoomCode(room);
+      if (mode === "online") {
+        setGameMode("online");
+      }
+    });
+  }, [hydrated]);
+
   useEffect(
     () => () => {
       socketRef.current?.close();
@@ -244,16 +358,22 @@ export function useChessGame() {
   );
 
   const updateProfileFromResult = useCallback(
-    (wonBy: "white" | "black" | "draw", insights: CoachInsight[]) => {
+    (
+      wonBy: "white" | "black" | "draw",
+      insights: CoachInsight[],
+      playerColor: PlayerColor = "white",
+    ) => {
       setProfile((current) => {
         const next = { ...current };
         let xpGain = 40;
+        const playerWon = wonBy !== "draw" && wonBy === playerColor;
+        const playerLost = wonBy !== "draw" && wonBy !== playerColor;
 
-        if (wonBy === "white") {
+        if (playerWon) {
           next.wins += 1;
           next.rating += 14;
           xpGain += 20;
-        } else if (wonBy === "black") {
+        } else if (playerLost) {
           next.losses += 1;
           next.rating = Math.max(800, next.rating - 10);
         } else {
@@ -267,7 +387,7 @@ export function useChessGame() {
           next.achievements = [...next.achievements, "first-win"];
         }
         if (
-          wonBy === "white" &&
+          playerWon &&
           insights.every((insight) => insight.severity !== "blunder") &&
           !next.achievements.includes("calm-finisher")
         ) {
@@ -280,7 +400,7 @@ export function useChessGame() {
 
         next.xp += xpGain;
         next.level = Math.floor(next.xp / 120) + 1;
-        next.streak = wonBy === "white" ? next.streak + 1 : 0;
+        next.streak = playerWon ? next.streak + 1 : 0;
         return next;
       });
     },
@@ -288,13 +408,17 @@ export function useChessGame() {
   );
 
   const analyzeCompletedGame = useCallback(
-    async (snapshot: StoredGame, persistedId?: string) => {
+    async (
+      snapshot: StoredGame,
+      persistedId?: string,
+      playerColor: PlayerColor = "white",
+    ) => {
       if (!getAuthToken()) {
-        updateProfileFromResult(snapshot.result, []);
+        updateProfileFromResult(snapshot.result, [], playerColor);
         return snapshot;
       }
       if (!profile.isPro) {
-        updateProfileFromResult(snapshot.result, []);
+        updateProfileFromResult(snapshot.result, [], playerColor);
         return snapshot;
       }
 
@@ -313,14 +437,14 @@ export function useChessGame() {
           insights,
         };
 
-        updateProfileFromResult(snapshot.result, insights);
+        updateProfileFromResult(snapshot.result, insights, playerColor);
         setGameHistory((current) =>
           current.map((entry) => (entry.id === snapshot.id || entry.id === enriched.id ? enriched : entry)),
         );
         return enriched;
       } catch (error) {
         console.error("Failed to analyze game", error);
-        updateProfileFromResult(snapshot.result, []);
+        updateProfileFromResult(snapshot.result, [], playerColor);
         return snapshot;
       } finally {
         setAnalysisBusy(false);
@@ -415,11 +539,40 @@ export function useChessGame() {
       if (aiThinking) {
         return false;
       }
-      if (gameMode === "online" && connectionState !== "connected") {
+      if (gameMode === "online" && !onlineConnected) {
         return false;
       }
 
       const activeGame = chessRef.current;
+
+      if (gameMode === "online") {
+        const assignedColor = roomStateRef.current?.assignedColor ?? null;
+        if (!isPlayersTurn(activeGame, assignedColor)) {
+          return false;
+        }
+
+        const probe = activeGame.move({
+          from: source as Square,
+          to: target as Square,
+          promotion: "q",
+        });
+        if (!probe) {
+          return false;
+        }
+
+        activeGame.undo();
+        clearSelection();
+        socketRef.current?.send(
+          JSON.stringify({
+            type: "move",
+            source,
+            target,
+            promotion: "q",
+          }),
+        );
+        return false;
+      }
+
       const moved = activeGame.move({
         from: source as Square,
         to: target as Square,
@@ -435,18 +588,6 @@ export function useChessGame() {
       syncGameState();
       void play(moved.captured ? "capture" : activeGame.inCheck() ? "check" : "move");
 
-      if (gameMode === "online" && socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(
-          JSON.stringify({
-            source,
-            target,
-            san: moved.san,
-            fen: activeGame.fen(),
-            pgn: activeGame.pgn(),
-          }),
-        );
-      }
-
       if (activeGame.isGameOver()) {
         void finalizeGame();
         return true;
@@ -461,9 +602,9 @@ export function useChessGame() {
     [
       aiThinking,
       clearSelection,
-      connectionState,
       finalizeGame,
       gameMode,
+      onlineConnected,
       play,
       playAiResponse,
       syncGameState,
@@ -473,9 +614,15 @@ export function useChessGame() {
   const handleSquareClick = useCallback(
     (square: string) => {
       const activeGame = chessRef.current;
+      const assignedColor = roomStateRef.current?.assignedColor ?? null;
 
       if (selectedSquare && legalTargets.includes(square)) {
         void makeMove(selectedSquare, square);
+        return;
+      }
+
+      if (gameMode === "online" && !isPlayersTurn(activeGame, assignedColor)) {
+        clearSelection();
         return;
       }
 
@@ -492,7 +639,7 @@ export function useChessGame() {
           .map((move) => move.to),
       );
     },
-    [clearSelection, legalTargets, makeMove, selectedSquare],
+    [clearSelection, gameMode, legalTargets, makeMove, selectedSquare],
   );
 
   const undoMove = useCallback(() => {
@@ -508,16 +655,37 @@ export function useChessGame() {
     syncGameState();
   }, [clearSelection, gameMode, syncGameState]);
 
+  const clearOnlineRoom = useCallback((nextConnectionState = "offline") => {
+    socketRef.current?.close();
+    socketRef.current = null;
+    roomStateRef.current = null;
+    assignedColorRef.current = null;
+    finishedRoomRef.current = null;
+    setRoomState(null);
+    setConnectionState(nextConnectionState);
+  }, []);
+
   const resignGame = useCallback(() => {
+    if (gameMode === "online") {
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: "resign" }));
+      }
+      return;
+    }
+
     void finalizeGame(chessRef.current.turn() === "w" ? "black" : "white");
     chessRef.current = new Chess();
     clearSelection();
     setLastMoveSquares([]);
     syncGameState();
-  }, [clearSelection, finalizeGame, syncGameState]);
+  }, [clearSelection, finalizeGame, gameMode, syncGameState]);
 
   const resetBoard = useCallback(
     (nextMode: GameMode = gameMode) => {
+      if (gameMode === "online" || roomStateRef.current !== null) {
+        clearOnlineRoom();
+      }
+
       chessRef.current = new Chess();
       setGameMode(nextMode);
       setLastMoveSquares([]);
@@ -526,34 +694,184 @@ export function useChessGame() {
       clearSelection();
       syncGameState();
     },
-    [clearSelection, gameMode, syncGameState],
+    [clearOnlineRoom, clearSelection, gameMode, syncGameState],
   );
 
-  const connectRoom = useCallback(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_CHESS_WS_URL;
-    if (!wsUrl) {
-      setConnectionState("configure NEXT_PUBLIC_CHESS_WS_URL");
+  const openRoomSocket = useCallback(
+    (snapshot: MultiplayerRoomSnapshot) => {
+      const token = getAuthToken();
+      if (!token) {
+        setConnectionState("sign in to join room");
+        return;
+      }
+
+      const wsUrl =
+        process.env.NEXT_PUBLIC_CHESS_WS_URL ??
+        process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/^http/, "ws").replace(/\/api$/, "");
+      if (!wsUrl) {
+        setConnectionState("configure NEXT_PUBLIC_CHESS_WS_URL");
+        return;
+      }
+
+      clearOnlineRoom("connecting");
+      applyOnlineRoomSnapshot(snapshot);
+      setConnectionState("connecting");
+
+      const socket = new WebSocket(
+        `${wsUrl.replace(/\/$/, "")}/ws/games/${snapshot.roomId}?token=${encodeURIComponent(token)}`,
+      );
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        if (socketRef.current !== socket) {
+          return;
+        }
+        const currentSnapshot = roomStateRef.current;
+        setConnectionState(currentSnapshot ? describeConnection(currentSnapshot) : "connected");
+      };
+      socket.onclose = () => {
+        if (socketRef.current !== socket) {
+          return;
+        }
+        socketRef.current = null;
+        const currentSnapshot = roomStateRef.current;
+        if (currentSnapshot?.status === "finished") {
+          setConnectionState(describeConnection(currentSnapshot));
+          return;
+        }
+        setConnectionState("disconnected");
+      };
+      socket.onerror = () => {
+        if (socketRef.current !== socket) {
+          return;
+        }
+        setConnectionState("error");
+      };
+      socket.onmessage = (event) => {
+        if (socketRef.current !== socket) {
+          return;
+        }
+        const payload = JSON.parse(event.data) as ApiRoomStateEvent | ApiRoomErrorEvent;
+        if (payload.type === "error") {
+          setConnectionState(`error | ${payload.message}`);
+          return;
+        }
+        applyOnlineRoomSnapshot(mapRoomSnapshot(payload.room));
+      };
+    },
+    [applyOnlineRoomSnapshot, clearOnlineRoom],
+  );
+
+  const createRoom = useCallback(async () => {
+    if (!getAuthToken()) {
+      setConnectionState("sign in to create room");
       return;
     }
 
-    socketRef.current?.close();
-    const socket = new WebSocket(
-      `${wsUrl.replace(/\/$/, "")}/ws/games/${roomCode}`,
-    );
-    socketRef.current = socket;
-    setConnectionState("connecting");
+    try {
+      const room = await createMultiplayerRoom();
+      const snapshot = mapRoomSnapshot(room);
+      autoConnectRoomRef.current = null;
+      setGameMode("online");
+      openRoomSocket(snapshot);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setConnectionState(`error | ${error.message}`);
+      } else {
+        setConnectionState("unable to create room");
+      }
+    }
+  }, [openRoomSocket]);
 
-    socket.onopen = () => setConnectionState("connected");
-    socket.onclose = () => setConnectionState("disconnected");
-    socket.onerror = () => setConnectionState("error");
-    socket.onmessage = (event) => {
-      const payload = JSON.parse(event.data) as { pgn: string };
-      const synced = new Chess();
-      synced.loadPgn(payload.pgn);
-      chessRef.current = synced;
-      syncGameState();
+  const connectRoom = useCallback(async () => {
+    const trimmedRoomCode = roomCode.trim();
+    if (!trimmedRoomCode) {
+      setConnectionState("enter room code");
+      return;
+    }
+    if (!getAuthToken()) {
+      setConnectionState("sign in to join room");
+      return;
+    }
+
+    try {
+      const room = await joinMultiplayerRoom(trimmedRoomCode);
+      const snapshot = mapRoomSnapshot(room);
+      autoConnectRoomRef.current = null;
+      openRoomSocket(snapshot);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setConnectionState(`error | ${error.message}`);
+      } else {
+        setConnectionState("unable to join room");
+      }
+    }
+  }, [openRoomSocket, roomCode]);
+
+  useEffect(() => {
+    const targetRoom = autoConnectRoomRef.current;
+    if (
+      !hydrated ||
+      !targetRoom ||
+      gameMode !== "online" ||
+      roomCode !== targetRoom ||
+      socketRef.current !== null
+    ) {
+      return;
+    }
+
+    if (!getAuthToken()) {
+      return;
+    }
+
+    autoConnectRoomRef.current = null;
+    queueMicrotask(() => {
+      void connectRoom();
+    });
+  }, [connectRoom, gameMode, hydrated, roomCode]);
+
+  useEffect(() => {
+    if (!roomState || roomState.status !== "finished" || finishedRoomRef.current === roomState.roomId) {
+      return;
+    }
+
+    finishedRoomRef.current = roomState.roomId;
+
+    const finishedSnapshot: StoredGame = {
+      id: roomState.persistedGameId ?? `${roomState.roomId}-finished`,
+      createdAt: new Date().toISOString(),
+      mode: "online",
+      result: roomState.result ?? "draw",
+      pgn: roomState.pgn,
+      moves: roomState.moves,
+      opening: detectOpening(roomState.moves),
+      insights: [],
     };
-  }, [roomCode, syncGameState]);
+
+    queueMicrotask(() => {
+      setGameHistory((current) => {
+        const existingIndex = current.findIndex((entry) => entry.id === finishedSnapshot.id);
+        if (existingIndex >= 0) {
+          const next = [...current];
+          next[existingIndex] = finishedSnapshot;
+          return next;
+        }
+        return [finishedSnapshot, ...current];
+      });
+      setSelectedReplayId(finishedSnapshot.id);
+      setReplayPly(finishedSnapshot.moves.length);
+
+      if (roomState.persistedGameId && getAuthToken() && profile.isPro) {
+        void analyzeCompletedGame(
+          finishedSnapshot,
+          roomState.persistedGameId,
+          roomState.assignedColor ?? "white",
+        );
+      } else {
+        updateProfileFromResult(finishedSnapshot.result, [], roomState.assignedColor ?? "white");
+      }
+    });
+  }, [analyzeCompletedGame, profile.isPro, roomState, updateProfileFromResult]);
 
   const requestExplanation = useCallback(async () => {
     if (!selectedReplay) {
@@ -653,8 +971,10 @@ export function useChessGame() {
     aiThinking,
     analysisBusy,
     connectionState,
+    onlineConnected,
     roomCode,
     setRoomCode,
+    roomState,
     inviteLink,
     stockfishReady,
     stockfishError,
@@ -669,6 +989,7 @@ export function useChessGame() {
     undoMove,
     resetBoard,
     resignGame,
+    createRoom,
     connectRoom,
     requestExplanation,
     openUpgradeModal,

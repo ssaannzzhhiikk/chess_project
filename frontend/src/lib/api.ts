@@ -58,6 +58,40 @@ export type ApiUpgradeResponse = {
   user: ApiUser;
 };
 
+export type ApiRoomMoveSummary = {
+  source: string;
+  target: string;
+  san: string;
+  player_id: string;
+  player_color: "white" | "black";
+};
+
+export type ApiMultiplayerRoom = {
+  room_id: string;
+  white_player_id: string | null;
+  black_player_id: string | null;
+  current_fen: string;
+  moves: string[];
+  status: "waiting" | "active" | "finished";
+  disconnected_players: string[];
+  assigned_color: "white" | "black" | null;
+  last_move?: ApiRoomMoveSummary | null;
+  result: "white" | "black" | "draw" | null;
+  pgn: string;
+  persisted_game_id: string | null;
+  termination: string | null;
+};
+
+export type ApiRoomStateEvent = {
+  type: "room_state";
+  room: ApiMultiplayerRoom;
+};
+
+export type ApiRoomErrorEvent = {
+  type: "error";
+  message: string;
+};
+
 type RequestOptions = RequestInit & {
   auth?: boolean;
 };
@@ -188,6 +222,20 @@ export async function explainCoachMove(payload: {
 
 export async function upgradeToPro() {
   return apiRequest<ApiUpgradeResponse>("/upgrade", {
+    method: "POST",
+    auth: true,
+  });
+}
+
+export async function createMultiplayerRoom() {
+  return apiRequest<ApiMultiplayerRoom>("/multiplayer/rooms", {
+    method: "POST",
+    auth: true,
+  });
+}
+
+export async function joinMultiplayerRoom(roomId: string) {
+  return apiRequest<ApiMultiplayerRoom>(`/multiplayer/rooms/${roomId}/join`, {
     method: "POST",
     auth: true,
   });
