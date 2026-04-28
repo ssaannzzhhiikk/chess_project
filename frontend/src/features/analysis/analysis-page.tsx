@@ -11,7 +11,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/skeleton-card";
-import { ApiError, ApiGame, clearAuthToken, getAuthToken, getGames, getProfile } from "@/lib/api";
+import { UpgradeModal } from "@/components/ui/upgrade-modal";
+import {
+  ApiError,
+  ApiGame,
+  ApiGameAnalysis,
+  clearAuthToken,
+  getAuthToken,
+  getGameAnalysis,
+  getGames,
+  getProfile,
+  upgradeToPro,
+} from "@/lib/api";
 
 type HistoryRow = {
   id: string;
@@ -21,6 +32,7 @@ type HistoryRow = {
   eval: string;
   explanation: string;
   bestMove: string;
+  analysis: ApiGameAnalysis | null;
 };
 
 function formatDate(value: string) {
@@ -30,22 +42,36 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function mapGamesToRows(games: ApiGame[]): HistoryRow[] {
-  return games.map((game, index) => ({
+function mapGamesToRows(games: ApiGame[], analyses: Array<ApiGameAnalysis | null>): HistoryRow[] {
+  return games.map((game, index) => {
+    const analysis = analyses[index] ?? null;
+    const quality =
+      analysis?.blunders_count
+        ? "Needs review"
+        : analysis?.mistakes_count
+          ? "Mistakes"
+          : game.result === "win" || game.result === "white"
+            ? "Win"
+            : game.result === "loss" || game.result === "black"
+              ? "Loss"
+              : "Draw";
+
+    return {
     id: game.id,
     ply: index + 1,
     move: game.opening || (game.mode === "ai" ? "AI match" : "Multiplayer match"),
-    quality:
-      game.result === "win" || game.result === "white"
-        ? "Win"
-        : game.result === "loss" || game.result === "black"
-          ? "Loss"
-          : "Draw",
-    eval: `${game.moves.length} moves`,
+    quality,
+    eval: analysis
+      ? `${analysis.blunders_count} blunders, ${analysis.mistakes_count} mistakes`
+      : `${game.moves.length} moves`,
     explanation:
-      game.pgn.trim() || `Finished on ${formatDate(game.created_at)} in ${game.mode} mode.`,
-    bestMove: game.moves.at(-1) || "No move recorded",
-  }));
+      analysis?.summary ||
+      game.pgn.trim() ||
+      `Finished on ${formatDate(game.created_at)} in ${game.mode} mode.`,
+    bestMove: analysis?.best_moves[0] || game.moves.at(-1) || "No move recorded",
+    analysis,
+  };
+  });
 }
 
 export function AnalysisPage() {
@@ -54,6 +80,11 @@ export function AnalysisPage() {
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isPro, setIsPro] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!getAuthToken()) {
@@ -64,15 +95,33 @@ export function AnalysisPage() {
     let active = true;
 
     async function loadHistory() {
+      setLoading(true);
+      setError(null);
       try {
-        await getProfile();
+        const user = await getProfile();
         const games = await getGames();
-        const nextRows = mapGamesToRows(games);
+        const nextIsPro = user.is_pro;
+        const analyses = nextIsPro
+          ? await Promise.all(
+              games.map(async (game) => {
+                try {
+                  return await getGameAnalysis(game.id);
+                } catch (cause) {
+                  if (cause instanceof ApiError && cause.status === 404) {
+                    return null;
+                  }
+                  throw cause;
+                }
+              }),
+            )
+          : games.map(() => null);
+        const nextRows = mapGamesToRows(games, analyses);
 
         if (!active) {
           return;
         }
 
+        setIsPro(nextIsPro);
         setRows(nextRows);
         setSelectedId(nextRows[0]?.id ?? null);
       } catch (cause) {
@@ -99,27 +148,65 @@ export function AnalysisPage() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [refreshKey, router]);
 
   const selected = useMemo(
     () => rows.find((row) => row.id === selectedId) ?? rows[0] ?? null,
     [rows, selectedId],
   );
   const summary = useMemo(() => {
-    const wins = rows.filter((row) => row.quality === "Win").length;
-    const losses = rows.filter((row) => row.quality === "Loss").length;
-    const draws = rows.filter((row) => row.quality === "Draw").length;
+    if (!isPro) {
+      return {
+        accuracy: 0,
+        blunders: 0,
+        mistakes: 0,
+        bestMoves: 0,
+      };
+    }
+
+    const blunders = rows.reduce((total, row) => total + (row.analysis?.blunders_count ?? 0), 0);
+    const mistakes = rows.reduce((total, row) => total + (row.analysis?.mistakes_count ?? 0), 0);
+    const bestMoves = rows.reduce((total, row) => total + (row.analysis?.best_moves.length ?? 0), 0);
+    const penalty = blunders * 12 + mistakes * 5;
 
     return {
-      accuracy: rows.length ? Math.round((wins / rows.length) * 100) : 0,
-      blunders: losses,
-      mistakes: draws,
-      bestMoves: wins,
+      accuracy: rows.length ? Math.max(0, 100 - penalty) : 0,
+      blunders,
+      mistakes,
+      bestMoves,
     };
-  }, [rows]);
+  }, [isPro, rows]);
 
   return (
     <div className="space-y-6">
+      <UpgradeModal
+        open={upgradeOpen}
+        busy={upgradeBusy}
+        error={upgradeError}
+        onClose={() => {
+          setUpgradeOpen(false);
+          setUpgradeError(null);
+        }}
+        onUpgrade={async () => {
+          setUpgradeBusy(true);
+          setUpgradeError(null);
+          try {
+            const response = await upgradeToPro();
+            setIsPro(response.user.is_pro);
+            setUpgradeOpen(false);
+            setRefreshKey((current) => current + 1);
+          } catch (cause) {
+            if (cause instanceof ApiError) {
+              setUpgradeError(cause.message);
+            } else {
+              setUpgradeError("Unable to upgrade right now.");
+            }
+          } finally {
+            setUpgradeBusy(false);
+          }
+        }}
+      />
+
       <PageHeader
         eyebrow="AI Analysis"
         title="A coach-style breakdown, not just raw engine numbers."
@@ -149,6 +236,21 @@ export function AnalysisPage() {
           ))}
         </div>
       )}
+
+      {!loading && !isPro ? (
+        <Card>
+          <CardContent className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <Badge>Pro required</Badge>
+              <h3 className="mt-3 text-2xl font-semibold">Advanced AI Coach is locked on this account.</h3>
+              <p className="mt-2 text-sm text-[var(--muted)]">
+                Upgrade to unlock saved analysis, best-move suggestions, and backend coach review.
+              </p>
+            </div>
+            <Button onClick={() => setUpgradeOpen(true)}>Upgrade to Pro</Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Card>
@@ -209,6 +311,12 @@ export function AnalysisPage() {
                 title="History unavailable"
                 description={error}
                 label="Backend"
+              />
+            ) : !isPro ? (
+              <EmptyState
+                title="AI Coach is a Pro feature"
+                description="Upgrade this account to load persisted backend analysis for your saved games."
+                label="Upgrade"
               />
             ) : selected ? (
               <>

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 GameMode = Literal["ai", "multiplayer"]
@@ -30,6 +30,7 @@ class UserLogin(BaseModel):
 class UserRead(PersistenceSchema):
     id: UUID
     email: str
+    is_pro: bool
     xp: int
     wins: int
     created_at: datetime
@@ -80,6 +81,7 @@ class ProfileUserRead(BaseModel):
     id: UUID
     email: str
     username: str
+    is_pro: bool
     xp: int
     wins: int
     level: int
@@ -118,6 +120,29 @@ class CoachInsightRead(PersistenceSchema):
     mistakes_count: int
     blunders_count: int
     best_moves: JSONList
+
+
+class AnalyzeGameRequest(BaseModel):
+    game_id: UUID | None = None
+    pgn: str | None = None
+
+    @model_validator(mode="after")
+    def validate_input(self) -> "AnalyzeGameRequest":
+        if self.game_id is None and not (self.pgn and self.pgn.strip()):
+            raise ValueError("Either game_id or pgn must be provided.")
+        return self
+
+
+class AnalyzeGameResponse(BaseModel):
+    summary: str
+    mistakes_count: int = Field(default=0, ge=0)
+    blunders_count: int = Field(default=0, ge=0)
+    best_moves: list[str] = Field(default_factory=list)
+
+
+class UpgradeResponse(BaseModel):
+    message: str
+    user: UserRead
 
 
 class AchievementRead(PersistenceSchema):

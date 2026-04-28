@@ -7,10 +7,12 @@ import { PageHeader } from "@/components/layout/page-header";
 import { AchievementCard } from "@/components/profile/achievement-card";
 import { ProfileStats } from "@/components/profile/profile-stats";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/skeleton-card";
-import { ApiError, ApiGame, clearAuthToken, getAuthToken, getGames, getProfile } from "@/lib/api";
+import { UpgradeModal } from "@/components/ui/upgrade-modal";
+import { ApiError, ApiGame, ApiUser, clearAuthToken, getAuthToken, getGames, getProfile, upgradeToPro } from "@/lib/api";
 import { achievements, Profile } from "@/lib/mock-data";
 
 function toTitleCase(value: string) {
@@ -21,7 +23,7 @@ function toTitleCase(value: string) {
     .join(" ");
 }
 
-function mapGamesToProfile(email: string, games: ApiGame[]): Profile {
+function mapGamesToProfile(user: ApiUser, games: ApiGame[]): Profile {
   const wins = games.filter((game) => game.result === "win" || game.result === "white").length;
   const losses = games.filter((game) => game.result === "loss" || game.result === "black").length;
   const draws = games.filter((game) => game.result === "draw").length;
@@ -30,7 +32,7 @@ function mapGamesToProfile(email: string, games: ApiGame[]): Profile {
   const rating = Math.max(800, 1200 + wins * 14 - losses * 8 + draws * 2);
 
   return {
-    username: toTitleCase(email.split("@")[0] || "Player"),
+    username: toTitleCase(user.email.split("@")[0] || "Player"),
     city: games[0]?.city ?? "Unknown",
     rating,
     xp,
@@ -39,8 +41,8 @@ function mapGamesToProfile(email: string, games: ApiGame[]): Profile {
     losses,
     draws,
     streak: wins,
-    isPro: false,
-    email,
+    isPro: user.is_pro,
+    email: user.email,
     achievements: [],
   };
 }
@@ -79,6 +81,9 @@ export function ProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [games, setGames] = useState<ApiGame[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!getAuthToken()) {
@@ -98,7 +103,7 @@ export function ProfilePage() {
         }
 
         setGames(history);
-        setProfile(mapGamesToProfile(user.email, history));
+        setProfile(mapGamesToProfile(user, history));
       } catch (cause) {
         if (!active) {
           return;
@@ -137,6 +142,41 @@ export function ProfilePage() {
 
   return (
     <div className="space-y-6">
+      <UpgradeModal
+        open={upgradeOpen}
+        busy={upgradeBusy}
+        error={upgradeError}
+        onClose={() => {
+          setUpgradeOpen(false);
+          setUpgradeError(null);
+        }}
+        onUpgrade={async () => {
+          setUpgradeBusy(true);
+          setUpgradeError(null);
+          try {
+            const response = await upgradeToPro();
+            setProfile((current) =>
+              current
+                ? {
+                    ...current,
+                    isPro: response.user.is_pro,
+                    email: response.user.email,
+                  }
+                : current,
+            );
+            setUpgradeOpen(false);
+          } catch (cause) {
+            if (cause instanceof ApiError) {
+              setUpgradeError(cause.message);
+            } else {
+              setUpgradeError("Unable to upgrade right now.");
+            }
+          } finally {
+            setUpgradeBusy(false);
+          }
+        }}
+      />
+
       <PageHeader
         eyebrow="Profile"
         title={`${profile?.username ?? "Player"}'s performance hub`}
@@ -159,12 +199,15 @@ export function ProfilePage() {
                 {profile.username.slice(0, 2).toUpperCase()}
               </div>
               <div>
-                <Badge>{profile.city}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge>{profile.city}</Badge>
+                  <Badge>{profile.isPro ? "Pro" : "Starter"}</Badge>
+                </div>
                 <h2 className="mt-3 text-3xl font-semibold">{profile.username}</h2>
                 <p className="mt-2 text-sm text-[var(--muted)]">{profile.email}</p>
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-4">
               <div className="rounded-[20px] border border-white/8 bg-white/4 p-4">
                 <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Rating</p>
                 <p className="mt-2 text-2xl font-semibold">{profile.rating}</p>
@@ -176,6 +219,16 @@ export function ProfilePage() {
               <div className="rounded-[20px] border border-white/8 bg-white/4 p-4">
                 <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Streak</p>
                 <p className="mt-2 text-2xl font-semibold">{profile.streak}</p>
+              </div>
+              <div className="flex items-center">
+                <Button
+                  onClick={() => setUpgradeOpen(true)}
+                  variant={profile.isPro ? "secondary" : "primary"}
+                  className="w-full"
+                  disabled={profile.isPro}
+                >
+                  {profile.isPro ? "Pro active" : "Upgrade to Pro"}
+                </Button>
               </div>
             </div>
           </CardContent>

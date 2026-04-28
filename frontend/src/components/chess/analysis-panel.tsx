@@ -32,9 +32,11 @@ export function AnalysisPanel({
           <>
             {selectedReplay.insights.length === 0 ? (
               <div className="rounded-[24px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--muted)]">
-                {analysisBusy
-                  ? "Running post-game analysis..."
-                  : "No major mistakes were stored for this game."}
+                {!profile.isPro
+                  ? "Upgrade to Pro to unlock backend AI review and stored coach insights."
+                  : analysisBusy
+                    ? "Running post-game analysis..."
+                    : "No major mistakes were stored for this game."}
               </div>
             ) : (
               selectedReplay.insights.slice(0, 3).map((insight) => (

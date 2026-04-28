@@ -5,11 +5,11 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
-from app.models import Game, User
+from app.models import CoachInsight, Game, User
 from app.persistence_schemas import CoachInsightCreate, GameCreate, UserCreate
 from app.services.persistence.exceptions import DuplicateEmailError, EntityNotFoundError
-from app.services.persistence.games import create_game, get_user_games
 from app.services.persistence.coach_insights import save_coach_insight
+from app.services.persistence.games import create_game, get_user_games
 from app.services.persistence.users import create_user
 
 
@@ -147,6 +147,7 @@ class CoachInsightServiceTests(IsolatedAsyncioTestCase):
     async def test_save_coach_insight_persists_record(self) -> None:
         session = AsyncMock()
         session.add = Mock()
+        session.scalar.return_value = None
         game = Game(
             user_id=uuid4(),
             pgn="1. e4 e5",
@@ -177,3 +178,43 @@ class CoachInsightServiceTests(IsolatedAsyncioTestCase):
         session.flush.assert_awaited_once()
         session.commit.assert_awaited_once()
         session.refresh.assert_awaited_once()
+
+    async def test_save_coach_insight_updates_existing_record(self) -> None:
+        session = AsyncMock()
+        session.add = Mock()
+        game_id = uuid4()
+        game = Game(
+            user_id=uuid4(),
+            pgn="1. e4 e5 2. Nf3 Nc6",
+            moves=["e4", "e5", "Nf3", "Nc6"],
+            result="draw",
+            mode="ai",
+        )
+        existing = CoachInsight(
+            game_id=game_id,
+            summary="Old summary",
+            mistakes_count=1,
+            blunders_count=1,
+            best_moves=["e4"],
+        )
+        existing.id = uuid4()
+        session.get.return_value = game
+        session.scalar.return_value = existing
+        session.refresh.side_effect = AsyncMock()
+
+        insight = await save_coach_insight(
+            session,
+            CoachInsightCreate(
+                game_id=game_id,
+                summary="New summary",
+                mistakes_count=0,
+                blunders_count=2,
+                best_moves=["O-O"],
+            ),
+        )
+
+        self.assertEqual(insight.summary, "New summary")
+        self.assertEqual(existing.blunders_count, 2)
+        session.add.assert_not_called()
+        session.flush.assert_awaited_once()
+        session.commit.assert_awaited_once()

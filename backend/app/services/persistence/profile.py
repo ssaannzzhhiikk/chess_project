@@ -84,6 +84,7 @@ async def get_profile(session: AsyncSession, user_id: UUID) -> ProfileRead | Non
             id=user.id,
             email=user.email,
             username=build_username(user.email),
+            is_pro=user.is_pro,
             xp=user.xp,
             wins=user.wins,
             level=level,

@@ -6,6 +6,9 @@ const AUTH_TOKEN_KEY = "endgame-auth-token";
 export type ApiUser = {
   id: string;
   email: string;
+  is_pro: boolean;
+  xp: number;
+  wins: number;
   created_at: string;
 };
 
@@ -35,6 +38,24 @@ export type ApiGame = {
   opening?: string | null;
   city?: string;
   created_at: string;
+};
+
+export type ApiGameAnalysis = {
+  id?: string;
+  game_id?: string;
+  summary: string;
+  mistakes_count: number;
+  blunders_count: number;
+  best_moves: string[];
+};
+
+export type ApiCoachExplanation = {
+  explanation: string;
+};
+
+export type ApiUpgradeResponse = {
+  message: string;
+  user: ApiUser;
 };
 
 type RequestOptions = RequestInit & {
@@ -133,5 +154,41 @@ export async function saveGame(payload: {
     method: "POST",
     auth: true,
     body: JSON.stringify(payload),
+  });
+}
+
+export async function analyzeGame(payload: { game_id?: string; pgn?: string }) {
+  return apiRequest<ApiGameAnalysis>("/analyze-game", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getGameAnalysis(gameId: string) {
+  return apiRequest<ApiGameAnalysis>(`/games/${gameId}/analysis`, {
+    auth: true,
+  });
+}
+
+export async function explainCoachMove(payload: {
+  san: string;
+  severity: "best" | "inaccuracy" | "mistake" | "blunder";
+  best_move: string;
+  evaluation: number;
+  delta: number;
+  position_context: string;
+}) {
+  return apiRequest<ApiCoachExplanation>("/coach/explain", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function upgradeToPro() {
+  return apiRequest<ApiUpgradeResponse>("/upgrade", {
+    method: "POST",
+    auth: true,
   });
 }

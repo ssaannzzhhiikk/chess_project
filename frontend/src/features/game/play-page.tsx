@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { UpgradeModal } from "@/components/ui/upgrade-modal";
 import { useChessGame } from "./use-chess-game";
 
 export function PlayPage() {
@@ -23,6 +24,14 @@ export function PlayPage() {
 
   return (
     <div className="space-y-6">
+      <UpgradeModal
+        open={game.upgradeModalOpen}
+        busy={game.upgradeBusy}
+        error={game.upgradeError}
+        onClose={game.closeUpgradeModal}
+        onUpgrade={game.handleUpgrade}
+      />
+
       <PageHeader
         eyebrow="Play"
         title="Train, duel, and review from one polished board."
@@ -168,4 +177,3 @@ export function PlayPage() {
     </div>
   );
 }
-

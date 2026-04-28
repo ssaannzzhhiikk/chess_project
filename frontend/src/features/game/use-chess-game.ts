@@ -12,35 +12,34 @@ import {
 
 import { defaultProfile, type Profile, appStorageKeys } from "@/lib/mock-data";
 import { readStorage, writeStorage } from "@/lib/storage";
-import { getAuthToken, saveGame } from "@/lib/api";
+import {
+  analyzeGame,
+  ApiError,
+  explainCoachMove,
+  getAuthToken,
+  getProfile,
+  saveGame,
+  type ApiGameAnalysis,
+  upgradeToPro,
+} from "@/lib/api";
 import { useStockfish } from "@/hooks/use-stockfish";
 import { useChessSounds } from "@/hooks/use-chess-sounds";
-import { classify, detectOpening, getCapturedPieces, outcome, statusLabel } from "./chess-helpers";
+import { detectOpening, getCapturedPieces, outcome, statusLabel } from "./chess-helpers";
 import type { CoachInsight, GameMode, StoredGame } from "./types";
 
 const initialGame = new Chess();
 
 async function explainMove(insight: CoachInsight, opening: string) {
-  const response = await fetch("/api/coach/explain", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      san: insight.san,
-      severity: insight.severity,
-      bestMove: insight.bestMove,
-      evaluation: insight.evaluation,
-      delta: insight.delta,
-      positionContext: `Opening: ${opening}. Move ${insight.ply}.`,
-    }),
+  const severity = insight.severity === "good" ? "best" : insight.severity;
+
+  return explainCoachMove({
+    san: insight.san,
+    severity,
+    best_move: insight.bestMove,
+    evaluation: insight.evaluation,
+    delta: insight.delta,
+    position_context: `Opening: ${opening}. Move ${insight.ply}.`,
   });
-
-  if (!response.ok) {
-    throw new Error("Explanation failed.");
-  }
-
-  return (await response.json()) as { explanation: string };
 }
 
 function toApiGameMode(mode: GameMode): "ai" | "multiplayer" {
@@ -55,6 +54,27 @@ function toApiGameResult(result: "white" | "black" | "draw"): "win" | "loss" | "
     return "loss";
   }
   return "draw";
+}
+
+function mapAnalysisToInsights(analysis: ApiGameAnalysis): CoachInsight[] {
+  const severity =
+    analysis.blunders_count > 0
+      ? "blunder"
+      : analysis.mistakes_count > 0
+        ? "mistake"
+        : "best";
+
+  return [
+    {
+      ply: 1,
+      san: "Game review",
+      bestMove: analysis.best_moves[0] ?? "No suggestion",
+      evaluation: Math.max(0, analysis.best_moves.length * 10),
+      delta: analysis.blunders_count * 100 + analysis.mistakes_count * 40,
+      severity,
+      explanation: analysis.summary,
+    },
+  ];
 }
 
 export function useChessGame() {
@@ -83,6 +103,9 @@ export function useChessGame() {
   const [lastMoveSquares, setLastMoveSquares] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [captured, setCaptured] = useState(getCapturedPieces(initialGame));
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
 
   const selectedReplay = useMemo(
     () => gameHistory.find((entry) => entry.id === selectedReplayId) ?? null,
@@ -180,6 +203,39 @@ export function useChessGame() {
     writeStorage(appStorageKeys.history, gameHistory);
   }, [gameHistory, hydrated]);
 
+  useEffect(() => {
+    if (!hydrated || !getAuthToken()) {
+      return;
+    }
+
+    let active = true;
+
+    async function syncProfile() {
+      try {
+        const user = await getProfile();
+        if (!active) {
+          return;
+        }
+
+        setProfile((current) => ({
+          ...current,
+          email: user.email,
+          isPro: user.is_pro,
+          xp: Math.max(current.xp, user.xp),
+          wins: Math.max(current.wins, user.wins),
+        }));
+      } catch (error) {
+        console.error("Failed to sync profile", error);
+      }
+    }
+
+    void syncProfile();
+
+    return () => {
+      active = false;
+    };
+  }, [hydrated]);
+
   useEffect(
     () => () => {
       socketRef.current?.close();
@@ -232,60 +288,45 @@ export function useChessGame() {
   );
 
   const analyzeCompletedGame = useCallback(
-    async (snapshot: StoredGame) => {
-      if (!stockfishReady || snapshot.moves.length === 0) {
+    async (snapshot: StoredGame, persistedId?: string) => {
+      if (!getAuthToken()) {
+        updateProfileFromResult(snapshot.result, []);
+        return snapshot;
+      }
+      if (!profile.isPro) {
         updateProfileFromResult(snapshot.result, []);
         return snapshot;
       }
 
       setAnalysisBusy(true);
       try {
-        const reviewGame = new Chess();
-        const insights: CoachInsight[] = [];
-        const maxPlies = Math.min(snapshot.moves.length, 12);
-
-        for (let index = 0; index < maxPlies; index += 1) {
-          const moverColor = reviewGame.turn();
-          const before = await analyzePosition(reviewGame.fen(), 10);
-          const applied = reviewGame.move(snapshot.moves[index]);
-          if (!applied) {
-            continue;
-          }
-          const after = await analyzePosition(reviewGame.fen(), 10);
-          const delta = Math.abs(before.evaluation - after.evaluation);
-          const matchesBestMove =
-            `${applied.from}${applied.to}${applied.promotion ?? ""}` ===
-            before.bestMove;
-
-          insights.push({
-            ply: index + 1,
-            san: applied.san,
-            bestMove: before.bestMove,
-            evaluation:
-              moverColor === "w" ? after.evaluation : -after.evaluation,
-            delta,
-            severity: classify(delta, matchesBestMove),
-          });
-        }
+        const analysis = await analyzeGame(
+          persistedId
+            ? { game_id: persistedId }
+            : { pgn: snapshot.pgn },
+        );
+        const insights = mapAnalysisToInsights(analysis);
 
         const enriched = {
           ...snapshot,
-          insights: insights
-            .filter((insight) => insight.severity !== "best" && insight.severity !== "good")
-            .sort((left, right) => right.delta - left.delta)
-            .slice(0, 5),
+          id: persistedId ?? snapshot.id,
+          insights,
         };
 
         updateProfileFromResult(snapshot.result, insights);
         setGameHistory((current) =>
-          current.map((entry) => (entry.id === snapshot.id ? enriched : entry)),
+          current.map((entry) => (entry.id === snapshot.id || entry.id === enriched.id ? enriched : entry)),
         );
         return enriched;
+      } catch (error) {
+        console.error("Failed to analyze game", error);
+        updateProfileFromResult(snapshot.result, []);
+        return snapshot;
       } finally {
         setAnalysisBusy(false);
       }
     },
-    [analyzePosition, stockfishReady, updateProfileFromResult],
+    [profile.isPro, updateProfileFromResult],
   );
 
   const finalizeGame = useCallback(
@@ -309,19 +350,27 @@ export function useChessGame() {
       setSelectedReplayId(finished.id);
       setReplayPly(finished.moves.length);
       await play("end");
+      let persisted = finished;
+      let savedGameId: string | undefined;
       if (getAuthToken()) {
         try {
-          await saveGame({
+          const savedGame = await saveGame({
             pgn: finished.pgn,
             moves: finished.moves,
             result: toApiGameResult(finished.result),
             mode: toApiGameMode(finished.mode),
           });
+          savedGameId = savedGame.id;
+          persisted = { ...finished, id: savedGame.id };
+          setGameHistory((current) =>
+            current.map((entry) => (entry.id === finished.id ? persisted : entry)),
+          );
+          setSelectedReplayId(savedGame.id);
         } catch (error) {
           console.error("Failed to save game", error);
         }
       }
-      await analyzeCompletedGame(finished);
+      await analyzeCompletedGame(persisted, savedGameId);
     },
     [analyzeCompletedGame, gameMode, play],
   );
@@ -507,7 +556,13 @@ export function useChessGame() {
   }, [roomCode, syncGameState]);
 
   const requestExplanation = useCallback(async () => {
-    if (!selectedReplay || !profile.isPro) {
+    if (!selectedReplay) {
+      return;
+    }
+
+    if (!profile.isPro) {
+      setUpgradeError(null);
+      setUpgradeModalOpen(true);
       return;
     }
 
@@ -516,22 +571,65 @@ export function useChessGame() {
       return;
     }
 
-    const response = await explainMove(targetInsight, selectedReplay.opening);
-    setGameHistory((current) =>
-      current.map((entry) =>
-        entry.id === selectedReplay.id
-          ? {
-              ...entry,
-              insights: entry.insights.map((insight, index) =>
-                index === 0
-                  ? { ...insight, explanation: response.explanation }
-                  : insight,
-              ),
-            }
-          : entry,
-      ),
-    );
+    try {
+      const response = await explainMove(targetInsight, selectedReplay.opening);
+      setGameHistory((current) =>
+        current.map((entry) =>
+          entry.id === selectedReplay.id
+            ? {
+                ...entry,
+                insights: entry.insights.map((insight, index) =>
+                  index === 0
+                    ? { ...insight, explanation: response.explanation }
+                    : insight,
+                ),
+              }
+            : entry,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        setUpgradeError(null);
+        setUpgradeModalOpen(true);
+        return;
+      }
+      console.error("Failed to request explanation", error);
+    }
   }, [profile.isPro, selectedReplay]);
+
+  const closeUpgradeModal = useCallback(() => {
+    setUpgradeModalOpen(false);
+    setUpgradeError(null);
+  }, []);
+
+  const openUpgradeModal = useCallback(() => {
+    setUpgradeError(null);
+    setUpgradeModalOpen(true);
+  }, []);
+
+  const handleUpgrade = useCallback(async () => {
+    setUpgradeBusy(true);
+    setUpgradeError(null);
+    try {
+      const response = await upgradeToPro();
+      setProfile((current) => ({
+        ...current,
+        email: response.user.email,
+        isPro: response.user.is_pro,
+        xp: Math.max(current.xp, response.user.xp),
+        wins: Math.max(current.wins, response.user.wins),
+      }));
+      setUpgradeModalOpen(false);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setUpgradeError(error.message);
+      } else {
+        setUpgradeError("Unable to upgrade right now.");
+      }
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }, []);
 
   return {
     profile,
@@ -563,6 +661,9 @@ export function useChessGame() {
     boardStyles,
     captured,
     hydrated,
+    upgradeModalOpen,
+    upgradeBusy,
+    upgradeError,
     makeMove,
     handleSquareClick,
     undoMove,
@@ -570,5 +671,8 @@ export function useChessGame() {
     resignGame,
     connectRoom,
     requestExplanation,
+    openUpgradeModal,
+    closeUpgradeModal,
+    handleUpgrade,
   };
 }

@@ -1,5 +1,6 @@
 from collections import defaultdict
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 from jose import jwt
@@ -8,15 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import settings
 from .db import get_db_session
 from .dependencies import get_current_user
-from .models import User
+from .models import Game, User
 from .persistence_schemas import (
+    AnalyzeGameRequest,
+    AnalyzeGameResponse,
     AuthResponse,
+    CoachInsightCreate,
+    CoachInsightRead,
     GameCreate,
     GameCreateRequest,
     GameRead,
     LeaderboardEntryRead,
     LeaderboardSort,
     ProfileRead,
+    UpgradeResponse,
     UserCreate,
     UserLogin,
     UserRead,
@@ -34,6 +40,7 @@ from .schemas import (
 )
 from .services.chess_service import apply_game_result
 from .services.coach_service import explain_move
+from .services.game_analysis import analyze_game_content
 from .services.persistence import (
     DuplicateEmailError,
     InvalidCredentialsError,
@@ -41,9 +48,12 @@ from .services.persistence import (
     build_auth_response,
     create_game as create_game_service,
     create_user as create_user_service,
+    get_coach_insight_by_game_id,
     get_leaderboard,
     get_profile as get_profile_service,
     get_user_games,
+    save_coach_insight,
+    upgrade_user_to_pro,
 )
 from .store import store
 
@@ -99,6 +109,15 @@ async def read_profile(
     return profile
 
 
+@router.post("/upgrade", response_model=UpgradeResponse)
+async def upgrade_account(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> UpgradeResponse:
+    upgraded_user = await upgrade_user_to_pro(session, current_user)
+    return UpgradeResponse(message="Pro access unlocked", user=upgraded_user)
+
+
 @router.post("/auth/demo-login", response_model=LoginResponse)
 async def demo_login(payload: LoginRequest) -> LoginResponse:
     existing = next(
@@ -142,6 +161,61 @@ async def create_game(
     return await create_game_service(session, game)
 
 
+@router.post("/analyze-game", response_model=AnalyzeGameResponse)
+async def analyze_game(
+    payload: AnalyzeGameRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> AnalyzeGameResponse:
+    moves: list[str] | None = None
+    pgn = payload.pgn or ""
+
+    if payload.game_id is not None:
+        game = await session.get(Game, payload.game_id)
+        if game is None or game.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found")
+        pgn = game.pgn
+        moves = [move for move in game.moves if isinstance(move, str)]
+
+    analysis = analyze_game_content(pgn, moves=moves)
+
+    if payload.game_id is None:
+        return analysis
+
+    saved_insight = await save_coach_insight(
+        session,
+        CoachInsightCreate(
+            game_id=payload.game_id,
+            summary=analysis.summary,
+            mistakes_count=analysis.mistakes_count,
+            blunders_count=analysis.blunders_count,
+            best_moves=analysis.best_moves,
+        ),
+    )
+    return AnalyzeGameResponse(
+        summary=saved_insight.summary,
+        mistakes_count=saved_insight.mistakes_count,
+        blunders_count=saved_insight.blunders_count,
+        best_moves=[str(move) for move in saved_insight.best_moves],
+    )
+
+
+@router.get("/games/{game_id}/analysis", response_model=CoachInsightRead)
+async def read_game_analysis(
+    game_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> CoachInsightRead:
+    game = await session.get(Game, game_id)
+    if game is None or game.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found")
+
+    insight = await get_coach_insight_by_game_id(session, game_id)
+    if insight is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
+    return insight
+
+
 @router.post("/games/{game_id}/finish", response_model=GameRecord)
 async def finish_game(game_id: str, payload: FinishGameRequest) -> GameRecord:
     game = store.games.get(game_id)
@@ -170,7 +244,11 @@ async def leaderboard(
 
 
 @router.post("/coach/explain", response_model=CoachExplanationResponse)
-async def coach_explain(payload: CoachExplanationRequest) -> CoachExplanationResponse:
+async def coach_explain(
+    payload: CoachExplanationRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> CoachExplanationResponse:
+    del current_user
     return CoachExplanationResponse(explanation=await explain_move(payload))
 
 

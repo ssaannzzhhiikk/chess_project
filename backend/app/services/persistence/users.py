@@ -31,11 +31,19 @@ async def create_user(session: AsyncSession, payload: UserCreate) -> UserRead:
     user = User(
         email=normalized_email,
         hashed_password=hash_password(payload.password),
+        is_pro=False,
         xp=0,
         wins=0,
     )
     session.add(user)
     await session.flush()
+    await session.commit()
+    await session.refresh(user)
+    return UserRead.model_validate(user)
+
+
+async def upgrade_user_to_pro(session: AsyncSession, user: User) -> UserRead:
+    user.is_pro = True
     await session.commit()
     await session.refresh(user)
     return UserRead.model_validate(user)
