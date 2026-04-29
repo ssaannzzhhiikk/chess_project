@@ -6,6 +6,7 @@ from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
+from fastapi import status
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -15,6 +16,7 @@ from app.middleware.rate_limit import in_memory_rate_limiter
 from app.models import Game, MultiplayerGame, User
 from app.persistence_schemas import MultiplayerGameRead
 from app.services.multiplayer import room_manager
+from app.services.multiplayer_state_store import InMemoryRoomStateStore
 from app.services.persistence.auth import create_access_token
 
 
@@ -25,6 +27,7 @@ class MultiplayerApiTests(TestCase):
         self.session.add = Mock()
         self.users: dict = {}
         in_memory_rate_limiter.reset()
+        room_manager._state_store = InMemoryRoomStateStore()
 
         async def session_get(model, object_id):
             if model is User:
@@ -155,6 +158,40 @@ class MultiplayerApiTests(TestCase):
             self.assertEqual(error["message"], "Authentication required.")
             with self.assertRaises(WebSocketDisconnect):
                 websocket.receive_json()
+
+    def test_websocket_accepts_query_token_without_authorization_header(self) -> None:
+        white_user, white_token = self.create_user_and_token("white@example.com")
+        room_id = self.client.post(
+            "/api/multiplayer/rooms",
+            headers=self.auth_headers(white_token),
+        ).json()["room_id"]
+
+        with self.client.websocket_connect(
+            f"/ws/games/{room_id}?token={white_token}",
+            headers={"Origin": "https://chess-project.vercel.app"},
+        ) as websocket:
+            event = websocket.receive_json()
+
+        self.assertEqual(event["type"], "room_state")
+        self.assertEqual(event["room"]["white_player_id"], str(white_user.id))
+        self.assertEqual(event["room"]["assigned_color"], "white")
+
+    def test_websocket_invalid_query_token_closes_after_accept(self) -> None:
+        _, white_token = self.create_user_and_token("white@example.com")
+        room_id = self.client.post(
+            "/api/multiplayer/rooms",
+            headers=self.auth_headers(white_token),
+        ).json()["room_id"]
+
+        with self.client.websocket_connect(f"/ws/games/{room_id}?token=not-a-real-token") as websocket:
+            error = websocket.receive_json()
+            self.assertEqual(error["type"], "error")
+            self.assertEqual(error["code"], "unauthenticated")
+            self.assertEqual(error["message"], "Authentication required.")
+            with self.assertRaises(WebSocketDisconnect) as disconnect:
+                websocket.receive_json()
+
+        self.assertEqual(disconnect.exception.code, status.WS_1008_POLICY_VIOLATION)
 
     def test_websocket_rejects_missing_room_with_structured_error(self) -> None:
         _, token = self.create_user_and_token("white@example.com")

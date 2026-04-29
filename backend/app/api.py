@@ -58,6 +58,7 @@ from .services.persistence import (
 )
 
 router = APIRouter(prefix="/api")
+root_websocket_router = APIRouter()
 
 
 @router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -266,6 +267,7 @@ async def coach_explain(
     return CoachExplanationResponse(explanation=await explain_move(payload))
 
 
+@root_websocket_router.websocket("/ws/games/{room_id}")
 @router.websocket("/ws/games/{room_id}")
 async def game_room(
     websocket: WebSocket,

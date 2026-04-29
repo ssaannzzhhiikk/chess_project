@@ -8,10 +8,8 @@ from uuid import UUID, uuid4
 import chess
 import chess.pgn
 from fastapi import HTTPException, WebSocket, status
-from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import settings
 from ..models import User
 from ..persistence_schemas import MultiplayerGameCreate, MultiplayerRoomRead
 from ..schemas import (
@@ -27,6 +25,7 @@ from .multiplayer_state_store import (
     build_multiplayer_room_state_store,
 )
 from .persistence import create_multiplayer_game as create_multiplayer_game_service
+from .persistence.auth import resolve_user_from_access_token
 
 
 class MultiplayerSocketError(Exception):
@@ -227,19 +226,7 @@ class MultiplayerRoomManager:
         await websocket.close(code=ws_code, reason=message)
 
     async def resolve_user(self, session: AsyncSession, token: str | None) -> User | None:
-        if not token:
-            return None
-
-        try:
-            payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-            subject = payload.get("sub")
-            if subject is None:
-                return None
-            user_id = UUID(subject)
-        except (JWTError, ValueError):
-            return None
-
-        return await session.get(User, user_id)
+        return await resolve_user_from_access_token(session, token)
 
     def _build_room_read(self, room: MultiplayerRoomState, user_id: UUID) -> MultiplayerRoomRead:
         return MultiplayerRoomRead(

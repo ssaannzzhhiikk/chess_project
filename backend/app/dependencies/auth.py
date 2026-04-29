@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import settings
 from ..db import get_db_session
 from ..models import User
-from ..services.persistence.users import get_user_by_id
+from ..services.persistence.auth import resolve_user_from_access_token
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -27,16 +24,7 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-        subject = payload.get("sub")
-        if subject is None:
-            raise credentials_exception
-        user_id = UUID(subject)
-    except (JWTError, ValueError) as exc:
-        raise credentials_exception from exc
-
-    user = await get_user_by_id(session, user_id)
+    user = await resolve_user_from_access_token(session, token)
     if user is None:
         raise credentials_exception
     return user
