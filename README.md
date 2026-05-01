@@ -1,3 +1,4 @@
+```
 @@@@@@&GPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPG&@@@@@@
 @@@@@&PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPJ~^:^!5PPPPPPPPPPPPPPPP&@@@@@
 @@@@#PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPJ      ^PPPPPPPPPPPPPPPPP#@@@@
@@ -23,7 +24,7 @@ BPPPPPPPPPPPPPPPPPPPPPP?     7PPPPPPPP^      YPPPPPPPPPJ      !PPPPPPPP5?!~!JPPP
 @@@@#PPPPPPPPPPPPPPPPP5:     :5PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP#@@@@
 @@@@@&PPPPPPPPPPPPPPPPP57~~~?5PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP&@@@@@
 @@@@@@&GPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPG&@@@@@@
-
+```
 
  Please, accept me into the program
  Please, accept me into the program
@@ -37,7 +38,7 @@ BPPPPPPPPPPPPPPPPPPPPPP?     7PPPPPPPP^      YPPPPPPPPPJ      !PPPPPPPP5?!~!JPPP
  Please, accept me into the program
 
 Моё сердце уже принадлежит nFactorial!!!!!!
-
+```
                     .^!7?JJJJ?7!^.                .^!7?JJJJ?7!^.
                 ^7YPGGGGGGGGGGGGPY7^.        .^7YPGGGGGGGGGGGGPY7^
              .!YGGGGGGGGGGGGGGGGGGGG5?:    :75GGGGGGGGGGGGGGGGGGGGY!.
@@ -65,7 +66,7 @@ BPPPPPPPPPPPPPPPPPPPPPP?     7PPPPPPPP^      YPPPPPPPPPJ      !PPPPPPPP5?!~!JPPP
                                  :!JPGGGGGGGGPJ!:
                                     .~?5GG5?~.
                                        .^^.
-                                                                                           
+```                                                                                         
  
 
 
